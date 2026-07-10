@@ -1,0 +1,22 @@
+{
+  "name": "crm_contacts",
+  "description": "PRESET: Generic CRM contact list. The office-Joe starter.",
+  "seed": 100,
+  "rows": 500,
+  "columns": [
+    {"name": "contact_id", "generator": "row_id", "params": {"start": 1000}},
+    {"name": "full_name", "generator": "full_name"},
+    {"name": "email", "generator": "email"},
+    {"name": "phone", "generator": "phone", "null_rate": 0.15},
+    {"name": "company", "generator": "company"},
+    {"name": "city", "generator": "city"},
+    {"name": "state", "generator": "state"},
+    {"name": "lead_status", "generator": "choice_weighted",
+     "params": {"values": ["New", "Contacted", "Qualified", "Won", "Lost"],
+                "weights": [0.35, 0.30, 0.20, 0.08, 0.07]}},
+    {"name": "created", "generator": "date_between",
+     "params": {"start": "2024-06-01", "end": "2026-06-01"}}
+  ],
+  "output": {"format": "csv"},
+  "sink": {"sink": "file", "options": {"path": "out/crm_contacts.csv"}}
+}

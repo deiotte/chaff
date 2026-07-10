@@ -1,0 +1,18 @@
+{
+  "name": "sensor_readings",
+  "description": "PRESET: Time-series sensor telemetry as NDJSON — the shape a Kafka/HTTP stream will carry in Phase 2, and the ancestor of Phase 3 stateful entities.",
+  "seed": 300,
+  "rows": 5000,
+  "columns": [
+    {"name": "sensor_id", "generator": "pattern", "params": {"pattern": "SNSR-###"}},
+    {"name": "ts", "generator": "timestamp_between",
+     "params": {"start": "2026-07-01T00:00:00", "end": "2026-07-07T23:59:59"}},
+    {"name": "lat", "generator": "lat", "params": {"min": 38.6, "max": 39.1}},
+    {"name": "lon", "generator": "lon", "params": {"min": -77.6, "max": -76.9}},
+    {"name": "temp_c", "generator": "float_normal", "params": {"mean": 24.0, "stddev": 4.0}},
+    {"name": "battery_pct", "generator": "int_range", "params": {"min": 5, "max": 100}},
+    {"name": "healthy", "generator": "bool_rate", "params": {"true_rate": 0.93}}
+  ],
+  "output": {"format": "ndjson"},
+  "sink": {"sink": "file", "options": {"path": "out/sensor_readings.ndjson"}}
+}

@@ -1,0 +1,22 @@
+{
+  "name": "case_records",
+  "description": "PRESET: Investigative case tracker — weighted statuses so the dashboard chart has shape.",
+  "seed": 200,
+  "rows": 1000,
+  "columns": [
+    {"name": "case_number", "generator": "pattern", "params": {"pattern": "??-2025-#####"}},
+    {"name": "lead_agent", "generator": "full_name"},
+    {"name": "field_office", "generator": "choice",
+     "params": {"values": ["Washington", "Baltimore", "Richmond", "Norfolk", "Pittsburgh"]}},
+    {"name": "status", "generator": "choice_weighted",
+     "params": {"values": ["Open", "Pending Review", "Closed"], "weights": [0.55, 0.25, 0.20]}},
+    {"name": "priority", "generator": "choice_weighted",
+     "params": {"values": ["Low", "Medium", "High", "Critical"], "weights": [0.4, 0.35, 0.2, 0.05]}},
+    {"name": "opened_date", "generator": "date_between",
+     "params": {"start": "2023-01-01", "end": "2026-06-30"}},
+    {"name": "est_value", "generator": "float_normal",
+     "params": {"mean": 250000, "stddev": 120000, "min": 5000, "precision": 2}}
+  ],
+  "output": {"format": "sql", "options": {"dialect": "postgres"}},
+  "sink": {"sink": "file", "options": {"path": "out/case_records.sql"}}
+}

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chaff"
+version = "0.1.0"
+description = "Spec-driven synthetic demo data engine. Fake signals convincing enough to work with."
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.5",
+    "faker>=20.0",
+    "typer>=0.9",
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
+formats-extra = []   # Phase 2: pyarrow, fastavro, openpyxl land here
+streaming = []       # Phase 2: confluent-kafka, httpx land here
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+chaff = "chaff.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

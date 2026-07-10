@@ -1,0 +1,20 @@
+{
+  "name": "orders",
+  "description": "PRESET: E-commerce orders — normal-distributed amounts so revenue charts look organic, not uniform noise.",
+  "seed": 400,
+  "rows": 2500,
+  "columns": [
+    {"name": "order_id", "generator": "uuid"},
+    {"name": "customer", "generator": "full_name"},
+    {"name": "order_ts", "generator": "timestamp_between",
+     "params": {"start": "2025-01-01T00:00:00", "end": "2026-06-30T23:59:59"}},
+    {"name": "channel", "generator": "choice_weighted",
+     "params": {"values": ["web", "mobile", "phone", "in_store"], "weights": [0.5, 0.3, 0.05, 0.15]}},
+    {"name": "subtotal", "generator": "float_normal",
+     "params": {"mean": 85.0, "stddev": 40.0, "min": 4.99, "precision": 2}},
+    {"name": "shipped", "generator": "bool_rate", "params": {"true_rate": 0.88}},
+    {"name": "notes", "generator": "lorem_sentence", "null_rate": 0.7}
+  ],
+  "output": {"format": "json"},
+  "sink": {"sink": "file", "options": {"path": "out/orders.json"}}
+}
