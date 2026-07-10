@@ -93,6 +93,30 @@ def test_file_sink_end_to_end(tmp_path):
     assert (tmp_path / "o.csv").read_text().startswith("case_id,agent,status")
 
 
+def test_xlsx_is_byte_for_byte_deterministic():
+    """INV-3 extends to xlsx: a zip's timestamps must not leak wall-clock
+    entropy. Same spec + same seed = identical bytes, twice."""
+    spec = base_spec(rows=50, output={"format": "xlsx"})
+    a = get_encoder("xlsx")(spec, generate_rows(spec))
+    b = get_encoder("xlsx")(spec, generate_rows(spec))
+    assert a == b
+    assert a[:2] == b"PK"  # it's a real zip container
+
+
+def test_xlsx_round_trips_header_and_rows():
+    import io
+
+    import pytest
+    openpyxl = pytest.importorskip("openpyxl")
+
+    spec = base_spec(rows=10, output={"format": "xlsx"})
+    payload = get_encoder("xlsx")(spec, generate_rows(spec))
+    wb = openpyxl.load_workbook(io.BytesIO(payload))
+    ws = wb.active
+    assert [c.value for c in ws[1]] == ["case_id", "agent", "status", "opened", "amount"]
+    assert ws.max_row == 11  # header + 10 data rows
+
+
 def test_duplicate_column_names_rejected():
     import pytest
     with pytest.raises(Exception, match="duplicate"):

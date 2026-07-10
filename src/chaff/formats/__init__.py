@@ -142,3 +142,10 @@ def to_sql(spec: DatasetSpec, rows: list[dict]) -> bytes:
         out.append(f"INSERT INTO {table} ({col_list}) VALUES\n{values};")
 
     return ("\n\n".join(out) + "\n").encode("utf-8")
+
+
+# ── Heavy formats (optional deps under the `formats-extra` extra) ─────
+# Imported for their registration side-effect. The module registers its
+# encoder at import time WITHOUT importing openpyxl (that import is lazy,
+# inside the encoder), so core `import chaff.formats` stays dep-free.
+from . import excel  # noqa: E402,F401
