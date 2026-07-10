@@ -2,7 +2,7 @@
 
 Phased. Finish and verify a phase before starting the next (Build DNA §3).
 
-## Phase 1 — Core engine + file outputs  ← YOU ARE HERE (scaffold complete)
+## Phase 1 — Core engine + file outputs  ← COMPLETE
 - [x] Spec contract (`DatasetSpec`, versioned)
 - [x] Generator registry: people, location, ids, pattern, numeric
       distributions, weighted categoricals, dates, lorem (~24 generators)
@@ -11,14 +11,15 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
 - [x] CLI (generate / validate / registry)
 - [x] Invariant test suite; `make check` loop
 - [x] Preset library seed: 4 example specs
-- [ ] **CLAUDE CODE — Phase 1 completion:**
-  - [ ] Web UI: form-based spec builder against `/registry`, live preview
-        via `/preview`, download via `/generate`. Simple > clever; office
-        Joe is the user. (frontend lives in `api/static` or a `ui/` dir —
-        your call, ADR it)
-  - [ ] API: streaming download for large datasets; request size limits
-  - [ ] Excel (.xlsx) format encoder (openpyxl, `formats-extra` extra)
-  - [ ] GitHub Actions: `make check` + docker build on push
+- [x] **CLAUDE CODE — Phase 1 completion:**
+  - [x] Web UI: form-based spec builder against `/registry`, live preview
+        via `/preview`, download via `/generate`. Static, build-free page
+        in `api/static/`, served by the API process (ADR-0006).
+  - [x] API: streaming download (`/generate` → file attachment) + request
+        size limit (`CHAFF_API_MAX_ROWS`, default 100k → 413)
+  - [x] Excel (.xlsx) format encoder (openpyxl, `formats-extra` extra;
+        deterministic — zip + doc-props timestamps pinned, INV-3)
+  - [x] GitHub Actions: `make check` + docker build on push
 
 ## Phase 2 — Heavy formats + streaming sinks
 - [ ] Parquet (pyarrow), Avro (fastavro), XML encoders

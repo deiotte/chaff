@@ -21,9 +21,12 @@ chaff generate examples/crm_contacts.json   # 500 CRM contacts -> out/*.csv
 chaff generate examples/case_records.json   # 1000 cases -> Postgres SQL
 chaff generate examples/crm_contacts.json --seed 7 --rows 50 -o small.csv
 
-# API + UI (dev)
+# API + UI (dev) — open http://localhost:8000 for the form-based builder
 pip install -e '.[api]'
 make run-api
+
+# Excel (.xlsx) output needs the formats-extra extra
+pip install -e '.[formats-extra]'
 
 # Docker (the intended distribution — pull, build, run anywhere)
 docker compose up --build
@@ -36,8 +39,8 @@ docker compose --profile streaming up --build
 `spec -> generate -> encode -> sink`
 
 - **Spec is the product** (ADR-0001): UI/CLI/API all just build specs.
-- **Format ≠ sink** (ADR-0002): CSV/JSON/NDJSON/SQL today; Parquet/Avro and
-  Kafka/HTTP delivery in Phase 2 — any format, any compatible sink.
+- **Format ≠ sink** (ADR-0002): CSV/TSV/JSON/NDJSON/SQL/XLSX today; Parquet/Avro
+  and Kafka/HTTP delivery in Phase 2 — any format, any compatible sink.
 - **Semantic generators** (ADR-0003): "full_name", "pattern: DEA-####-?????",
   "70% Open / 20% Pending / 10% Closed" — not VARCHARs.
 - **Seeded** (ADR-0004): same spec + seed = byte-identical dataset. When the
@@ -50,7 +53,7 @@ src/chaff/          engine, spec contract, plugin registries
   generators/       semantic value generators (+ path rules)
   formats/          pure encoders (+ path rules)
   sinks/            delivery (+ path rules)
-api/                FastAPI skeleton (UI lands here — see ROADMAP)
+api/                FastAPI transport (main.py) + static UI (static/index.html)
 examples/           preset spec library
 docs/adr/           the five load-bearing decisions
 AGENTS.md           Build DNA — read first
