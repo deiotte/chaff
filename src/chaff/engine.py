@@ -41,8 +41,16 @@ def generate_rows(spec: DatasetSpec) -> list[dict[str, Any]]:
     return rows
 
 
+# Fun clause (AGENTS.md §5): seed 8675309 tips its hat to Jenny. Receipt
+# only — the payload bytes are untouched, so seed determinism is unharmed.
+_JENNY = 8675309
+
+
 def run(spec: DatasetSpec) -> str:
     """Full pipeline. Returns the sink's human-readable receipt."""
     rows = generate_rows(spec)
     payload = get_encoder(spec.output.format)(spec, rows)
-    return get_sink(spec.sink.sink)(spec, payload)
+    receipt = get_sink(spec.sink.sink)(spec, payload)
+    if spec.seed == _JENNY:
+        receipt += "\n☎  867-5309 — thanks for the seed, Jenny."
+    return receipt

@@ -117,6 +117,19 @@ def test_xlsx_round_trips_header_and_rows():
     assert ws.max_row == 11  # header + 10 data rows
 
 
+def test_jenny_egg_rides_the_receipt_only(tmp_path):
+    """Fun clause: seed 8675309 nods to Jenny in the receipt, and the
+    payload bytes are identical to any other seed's — determinism intact."""
+    def spec(seed):
+        return base_spec(rows=5, seed=seed,
+                         sink={"sink": "file", "options": {"path": str(tmp_path / f"{seed}.csv")}})
+    jenny_receipt = run(spec(8675309))
+    assert "Jenny" in jenny_receipt
+    assert "Jenny" not in run(spec(8675308))
+    # The egg rides the receipt only — it never reaches the file payload.
+    assert "Jenny" not in (tmp_path / "8675309.csv").read_text()
+
+
 def test_duplicate_column_names_rejected():
     import pytest
     with pytest.raises(Exception, match="duplicate"):
