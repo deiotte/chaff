@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chaff — build a dataset</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1c2330; --muted:#6b7484;
+          --line:#e2e6ec; --accent:#2f6f4f; --accent-ink:#fff; --bad:#b4232a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); background:var(--card); }
+  header h1 { margin:0; font-size:20px; letter-spacing:.2px; }
+  header p { margin:2px 0 0; color:var(--muted); font-size:13px; }
+  main { max-width:1000px; margin:0 auto; padding:24px; display:grid;
+         grid-template-columns:1fr; gap:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; }
+  .card h2 { margin:0 0 14px; font-size:14px; text-transform:uppercase;
+             letter-spacing:.6px; color:var(--muted); }
+  label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  input, select, textarea { width:100%; padding:8px 10px; border:1px solid var(--line);
+         border-radius:7px; font:inherit; background:#fff; color:inherit; }
+  textarea { resize:vertical; min-height:36px; font-family:ui-monospace,Menlo,monospace; font-size:13px; }
+  .row3 { display:grid; grid-template-columns:2fr 1fr 1fr; gap:12px; }
+  .cols-head, .col { display:grid; gap:10px;
+         grid-template-columns:1.4fr 1.4fr 2fr .8fr 32px; align-items:end; }
+  .cols-head { margin-bottom:6px; }
+  .cols-head span { font-size:12px; color:var(--muted); }
+  .col { margin-bottom:10px; }
+  .btn { border:0; border-radius:7px; padding:9px 16px; font:inherit; font-weight:600;
+         cursor:pointer; background:var(--accent); color:var(--accent-ink); }
+  .btn.ghost { background:#eef1f4; color:var(--ink); font-weight:500; }
+  .btn.mini { padding:8px 0; }
+  .actions { display:flex; gap:10px; align-items:center; }
+  .x { background:#f3e7e7; color:var(--bad); border:0; border-radius:7px; height:36px; cursor:pointer; font-size:16px; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--muted); font-weight:600; }
+  .preview-wrap { overflow-x:auto; }
+  .msg { font-size:13px; margin-left:auto; }
+  .msg.err { color:var(--bad); }
+  .msg.ok { color:var(--accent); }
+  .hint { color:var(--muted); font-size:12px; margin-top:2px; }
+  .empty { color:var(--muted); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>chaff</h1>
+  <p>Describe a dataset, preview it, download it. No engineer required.</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>Dataset</h2>
+    <div class="row3">
+      <div><label>Name</label><input id="name" value="my_dataset"></div>
+      <div><label>Rows</label><input id="rows" type="number" min="1" value="100"></div>
+      <div><label>Seed (optional, for repeatable output)</label><input id="seed" type="number" placeholder="e.g. 1337"></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Columns</h2>
+    <div class="cols-head">
+      <span>Name</span><span>Generator</span><span>Params (JSON, optional)</span><span>Null rate</span><span></span>
+    </div>
+    <div id="cols"></div>
+    <button class="btn ghost mini" id="addCol" style="margin-top:6px;padding:8px 14px">+ Add column</button>
+    <p class="hint" id="genHint"></p>
+  </section>
+
+  <section class="card">
+    <h2>Output</h2>
+    <div class="row3">
+      <div><label>Format</label><select id="format"></select></div>
+      <div></div><div></div>
+    </div>
+    <div class="actions" style="margin-top:16px">
+      <button class="btn ghost" id="previewBtn">Preview</button>
+      <button class="btn" id="downloadBtn">Download</button>
+      <span class="msg" id="msg"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Preview <span style="font-weight:400;text-transform:none;letter-spacing:0">(first rows)</span></h2>
+    <div class="preview-wrap"><div id="preview" class="empty">Click Preview to see sample rows.</div></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let GENERATORS = [];
+
+// Populate dropdowns from the live registry — never hardcode (INV-4).
+async function loadRegistry() {
+  const r = await fetch('/registry');
+  const reg = await r.json();
+  GENERATORS = reg.generators;
+  const fmt = $('format');
+  fmt.innerHTML = reg.formats.map(f => `<option>${f}</option>`).join('');
+  addColumn('id', 'row_id');
+  addColumn('name', 'full_name');
+}
+
+function generatorOptions(selected) {
+  return GENERATORS.map(g => `<option${g === selected ? ' selected' : ''}>${g}</option>`).join('');
+}
+
+function addColumn(name = '', generator = '') {
+  const div = document.createElement('div');
+  div.className = 'col';
+  div.innerHTML =
+    `<input class="c-name" placeholder="column" value="${name}">
+     <select class="c-gen">${generatorOptions(generator)}</select>
+     <textarea class="c-params" rows="1" placeholder='{"min":0,"max":100}'></textarea>
+     <input class="c-null" type="number" min="0" max="1" step="0.05" value="0">
+     <button class="x" title="remove">×</button>`;
+  div.querySelector('.x').onclick = () => div.remove();
+  $('cols').appendChild(div);
+}
+
+// Assemble a DatasetSpec from the form. The UI only builds specs (INV-1).
+function buildSpec() {
+  const cols = [...document.querySelectorAll('.col')].map(c => {
+    const name = c.querySelector('.c-name').value.trim();
+    const generator = c.querySelector('.c-gen').value;
+    const raw = c.querySelector('.c-params').value.trim();
+    let params = {};
+    if (raw) {
+      try { params = JSON.parse(raw); }
+      catch (e) { throw new Error(`Column "${name}": params is not valid JSON.`); }
+    }
+    const null_rate = parseFloat(c.querySelector('.c-null').value) || 0;
+    return { name, generator, params, null_rate };
+  }).filter(c => c.name);
+
+  const seedRaw = $('seed').value.trim();
+  const spec = {
+    name: $('name').value.trim() || 'dataset',
+    rows: parseInt($('rows').value, 10) || 1,
+    columns: cols,
+    output: { format: $('format').value },
+  };
+  if (seedRaw !== '') spec.seed = parseInt(seedRaw, 10);
+  return spec;
+}
+
+function setMsg(text, kind) { const m = $('msg'); m.textContent = text; m.className = 'msg ' + (kind || ''); }
+
+async function apiError(resp) {
+  try { const b = await resp.json(); return b.detail ? JSON.stringify(b.detail) : resp.statusText; }
+  catch { return resp.statusText; }
+}
+
+async function doPreview() {
+  setMsg('Generating preview…');
+  let spec;
+  try { spec = buildSpec(); } catch (e) { return setMsg(e.message, 'err'); }
+  if (!spec.columns.length) return setMsg('Add at least one column.', 'err');
+  const r = await fetch('/preview?limit=15', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+  if (!r.ok) return setMsg(await apiError(r), 'err');
+  const { rows } = await r.json();
+  renderPreview(rows);
+  setMsg(`${rows.length} sample rows`, 'ok');
+}
+
+function renderPreview(rows) {
+  const el = $('preview');
+  if (!rows.length) { el.className = 'empty'; el.textContent = 'No rows.'; return; }
+  el.className = '';
+  const cols = Object.keys(rows[0]);
+  const head = '<tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>';
+  const body = rows.map(r => '<tr>' + cols.map(c =>
+    `<td>${r[c] === null ? '<span style="color:#aaa">null</span>' : String(r[c])}</td>`).join('') + '</tr>').join('');
+  el.innerHTML = `<table>${head}${body}</table>`;
+}
+
+async function doDownload() {
+  setMsg('Generating…');
+  let spec;
+  try { spec = buildSpec(); } catch (e) { return setMsg(e.message, 'err'); }
+  if (!spec.columns.length) return setMsg('Add at least one column.', 'err');
+  const r = await fetch('/generate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+  if (!r.ok) return setMsg(await apiError(r), 'err');
+
+  const cd = r.headers.get('Content-Disposition') || '';
+  const m = cd.match(/filename="?([^"]+)"?/);
+  const filename = m ? m[1] : `${spec.name}.out`;
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  a.remove(); URL.revokeObjectURL(url);
+  setMsg(`Downloaded ${filename} (${blob.size} bytes)`, 'ok');
+}
+
+$('addCol').onclick = () => addColumn();
+$('previewBtn').onclick = doPreview;
+$('downloadBtn').onclick = doDownload;
+loadRegistry();
+</script>
+</body>
+</html>
