@@ -50,6 +50,10 @@ docker compose --profile streaming up --build
 - **Spec library**: pick a preset or a saved schema from the UI gallery, load
   it into the builder, tweak, and go. Saves persist under `CHAFF_LIBRARY_DIR`
   (a Docker volume); presets ship in `examples/`.
+- **Describe it in English** (ADR-0010): the UI can draft a spec from a plain
+  sentence via the Anthropic API (server-side `ANTHROPIC_API_KEY`, `nl` extra).
+  It drafts a *spec* you review and edit — the engine still generates the data
+  deterministically. Not an AI/ML data pipeline (INV-5), just a spec-builder aid.
 - **Multi-table** (ADR-0008): add related `tables` and an `fk` column that
   references another table's key; chaff generates them in dependency order
   with real referential integrity (customers → orders → lines), one file per
