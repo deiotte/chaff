@@ -135,24 +135,44 @@ async function loadRegistry() {
   fmt.innerHTML = reg.formats.map(f => `<option>${f}</option>`).join('');
   addColumn('id', 'row_id');
   addColumn('name', 'full_name');
+  $('genHint').textContent =
+    'Tip: the "derived" generator computes a value from other columns in the ' +
+    'same row — type a formula like  price * qty  (use column names declared ' +
+    'above it). Works with + - * / , comparisons, and round()/min()/max().';
 }
 
 function generatorOptions(selected) {
   return GENERATORS.map(g => `<option${g === selected ? ' selected' : ''}>${g}</option>`).join('');
 }
 
+// A `derived` column with only an `expr` shows the bare formula (not JSON),
+// so Karl types `price * qty` instead of {"expr":"price * qty"}.
+function paramsToText(generator, params) {
+  if (!params || !Object.keys(params).length) return '';
+  if (generator === 'derived' && params.expr && Object.keys(params).length === 1) return params.expr;
+  return JSON.stringify(params);
+}
+
+function syncParamsField(sel, params) {
+  const derived = sel.value === 'derived';
+  params.placeholder = derived ? 'formula, e.g. price * qty' : '{"min":0,"max":100}';
+}
+
 function addColumn(name = '', generator = '', params = null, nullRate = 0) {
   const div = document.createElement('div');
   div.className = 'col';
-  const paramsText = params && Object.keys(params).length ? JSON.stringify(params) : '';
   div.innerHTML =
     `<input class="c-name" placeholder="column">
      <select class="c-gen">${generatorOptions(generator)}</select>
-     <textarea class="c-params" rows="1" placeholder='{"min":0,"max":100}'></textarea>
+     <textarea class="c-params" rows="1"></textarea>
      <input class="c-null" type="number" min="0" max="1" step="0.05">
      <button class="x" title="remove">×</button>`;
   div.querySelector('.c-name').value = name;
-  div.querySelector('.c-params').value = paramsText;
+  const sel = div.querySelector('.c-gen');
+  const par = div.querySelector('.c-params');
+  par.value = paramsToText(sel.value, params);
+  syncParamsField(sel, par);
+  sel.onchange = () => syncParamsField(sel, par);
   div.querySelector('.c-null').value = nullRate || 0;
   div.querySelector('.x').onclick = () => div.remove();
   $('cols').appendChild(div);
@@ -177,8 +197,12 @@ function buildSpec() {
     const raw = c.querySelector('.c-params').value.trim();
     let params = {};
     if (raw) {
-      try { params = JSON.parse(raw); }
-      catch (e) { throw new Error(`Column "${name}": params is not valid JSON.`); }
+      if (generator === 'derived' && raw[0] !== '{') {
+        params = { expr: raw };  // bare formula -> {expr}; JSON still allowed for precision
+      } else {
+        try { params = JSON.parse(raw); }
+        catch (e) { throw new Error(`Column "${name}": params is not valid JSON.`); }
+      }
     }
     const null_rate = parseFloat(c.querySelector('.c-null').value) || 0;
     return { name, generator, params, null_rate };

@@ -72,9 +72,10 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       `domain`, `username`, `user_agent`, `slug`, `sha256`, `http_method`,
       `http_status`, `port`, `ulid`, `api_key`. Example:
       `examples/web_access_logs.json`.
-- [ ] Derived/computed columns: a column computed from other columns in the
-      same row (`total = price * qty`) — needs `GenContext` to see the
-      in-progress row. The internal-correlation "realism unlock" for ML demos.
+- [x] Derived/computed columns: a column computed from other columns in the
+      same row (`total = price * qty`) — `GenContext.row` + a safe (no-eval)
+      formula evaluator, validated at load time (ADR-0012). The
+      internal-correlation "realism unlock" for demos.
 - [ ] Multi-provider NL drafting: OpenAI + Google alongside Anthropic,
       auto-detected by which API key env var is set.
 - [ ] Tier 2 generators: geo (`country`, `zip_code`, `timezone`), finance

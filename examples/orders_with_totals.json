@@ -1,0 +1,19 @@
+{
+  "name": "orders_with_totals",
+  "description": "PRESET: Order lines where the money adds up — quantity × price, a discount, and a computed net total. Shows derived/computed columns: a column's value from other columns in the same row.",
+  "seed": 1337,
+  "rows": 1000,
+  "columns": [
+    {"name": "order_id", "generator": "pattern", "params": {"pattern": "ORD-######"}},
+    {"name": "sku", "generator": "pattern", "params": {"pattern": "SKU-????"}},
+    {"name": "unit_price", "generator": "money", "params": {"min": 2.5, "max": 250.0}},
+    {"name": "qty", "generator": "int_range", "params": {"min": 1, "max": 8}},
+    {"name": "subtotal", "generator": "derived", "params": {"expr": "unit_price * qty", "precision": 2}},
+    {"name": "discount_rate", "generator": "choice_weighted", "params": {"values": [0.0, 0.1, 0.25], "weights": [0.7, 0.2, 0.1]}},
+    {"name": "net_total", "generator": "derived", "params": {"expr": "round(subtotal * (1 - discount_rate), 2)"}},
+    {"name": "is_bulk", "generator": "derived", "params": {"expr": "qty >= 5"}},
+    {"name": "tier", "generator": "derived", "params": {"expr": "'wholesale' if net_total > 500 else 'retail'"}}
+  ],
+  "output": {"format": "csv"},
+  "sink": {"sink": "file", "options": {"path": "out/orders_with_totals.csv"}}
+}

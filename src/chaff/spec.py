@@ -151,6 +151,37 @@ class DatasetSpec(BaseModel):
                 raise ValueError(f"duplicate table names: {sorted(dupes)}")
         return self
 
+    @model_validator(mode="after")
+    def _validate_derived_formulas(self) -> "DatasetSpec":
+        """Fail early (at load) if a `derived` column's formula is malformed
+        or references a column that isn't declared before it — so the UI/CLI
+        shows a precise error instead of a surprise at generation time. The
+        evaluator import is lazy to keep the spec module free of engine deps."""
+        from .generators._expr import FormulaError, validate_expr
+
+        def check(cols: list[ColumnSpec], where: str) -> None:
+            seen: set[str] = set()
+            for c in cols:
+                if c.generator == "derived":
+                    expr = c.params.get("expr") or c.params.get("formula")
+                    if not expr:
+                        raise ValueError(f"{where} column '{c.name}': derived needs an 'expr'")
+                    try:
+                        refs = validate_expr(expr)
+                    except FormulaError as e:
+                        raise ValueError(f"{where} column '{c.name}': {e}") from None
+                    missing = refs - seen
+                    if missing:
+                        raise ValueError(
+                            f"{where} column '{c.name}' formula references {sorted(missing)}, "
+                            "which must be column(s) declared before it")
+                seen.add(c.name)
+
+        check(self.columns, "dataset")
+        for t in self.tables or []:
+            check(t.columns, f"table '{t.name}'")
+        return self
+
 
 def load_spec(data: dict[str, Any] | str) -> DatasetSpec:
     """Parse and validate a spec from a dict or JSON string."""

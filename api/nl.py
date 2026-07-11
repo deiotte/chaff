@@ -73,9 +73,13 @@ def _system_prompt() -> str:
         "Guidance: choose semantic generators that fit each column (e.g. full_name, "
         "email, city, choice_weighted with values+weights, money, date_between with "
         "start+end, pattern with a '#'=digit/'?'=A-Z template, lognormal/poisson for "
-        "skewed numbers, ipv4/user_agent/http_status for logs). Give every generator "
-        "sensible params. Pick a reasonable row count and a format that suits the data. "
-        "Return only the JSON object."
+        "skewed numbers, ipv4/user_agent/http_status for logs). For a column computed "
+        "from other columns in the same row, use the 'derived' generator with "
+        "params {\"expr\": \"...\"} where the formula uses other column names — e.g. "
+        "{\"name\": \"total\", \"generator\": \"derived\", \"params\": {\"expr\": "
+        "\"price * qty\", \"precision\": 2}} — and declare it AFTER the columns it "
+        "references. Give every generator sensible params. Pick a reasonable row count "
+        "and a format that suits the data. Return only the JSON object."
     )
 
 
