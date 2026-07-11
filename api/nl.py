@@ -1,29 +1,54 @@
-"""Natural-language spec drafting (Phase 3, ADR-0010).
+"""Natural-language spec drafting (ADR-0010, multi-provider per ADR-0011).
 
 An interface that turns a plain-English description into a *draft*
 `DatasetSpec` the user reviews and edits — the UI's "describe it in English"
 box. It lives in the API layer, not the engine: like the UI/CLI/API, it
 *produces* a spec (INV-1); the engine still generates the data
-deterministically from that spec. This does NOT make chaff an AI/ML
-dataset pipeline (INV-5) — the LLM drafts a spec, nothing more.
+deterministically. This does NOT make chaff an AI/ML dataset pipeline
+(INV-5) — the LLM drafts a spec, nothing more.
 
-Uses the Anthropic SDK with a server-side key (`ANTHROPIC_API_KEY`); the
-browser never sees it. The model's JSON is validated with `load_spec` and
-one correction round-trip is attempted before giving up, so a malformed
-draft never reaches the caller.
+The provider is chosen by whichever API key is present in the server
+environment (the browser never sees it): Anthropic, then OpenAI, then
+Google. Each SDK is optional and imported lazily. Whatever the provider,
+the model's JSON is validated with `load_spec` and one correction
+round-trip is attempted before giving up, so a malformed draft never
+reaches the caller.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Callable
 
 from chaff.formats import list_formats
 from chaff.generators import list_generators
 from chaff.spec import load_spec
 
-MODEL = "claude-opus-4-8"
+# Per-provider default models, each overridable by env var.
+_MODELS = {
+    "anthropic": ("CHAFF_ANTHROPIC_MODEL", "claude-opus-4-8"),
+    "openai": ("CHAFF_OPENAI_MODEL", "gpt-4o"),
+    "google": ("CHAFF_GOOGLE_MODEL", "gemini-1.5-flash"),
+}
 MAX_TOKENS = 8192
+
+
+def active_provider() -> str | None:
+    """Which LLM provider a key is configured for, or None. Anthropic wins
+    ties, then OpenAI, then Google."""
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    if os.environ.get("OPENAI_API_KEY"):
+        return "openai"
+    if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
+        return "google"
+    return None
+
+
+def _model(provider: str) -> str:
+    env, default = _MODELS[provider]
+    return os.environ.get(env, default)
 
 
 def _system_prompt() -> str:
@@ -47,28 +72,74 @@ def _system_prompt() -> str:
         f"Available formats: {', '.join(list_formats())}.\n\n"
         "Guidance: choose semantic generators that fit each column (e.g. full_name, "
         "email, city, choice_weighted with values+weights, money, date_between with "
-        "start+end, pattern with a '#'=digit/'?'=A-Z template). Give every generator "
+        "start+end, pattern with a '#'=digit/'?'=A-Z template, lognormal/poisson for "
+        "skewed numbers, ipv4/user_agent/http_status for logs). Give every generator "
         "sensible params. Pick a reasonable row count and a format that suits the data. "
         "Return only the JSON object."
     )
 
 
-def _call_claude(description: str, error: str | None = None) -> str:
-    import anthropic  # lazy: only needed when actually drafting
-
-    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the environment
-    user = description
+def _user_prompt(description: str, error: str | None) -> str:
     if error:
-        user += (
-            f"\n\nYour previous attempt did not validate: {error}\n"
-            "Return a corrected JSON object only."
-        )
-    resp = client.messages.create(
-        model=MODEL, max_tokens=MAX_TOKENS,
-        system=_system_prompt(),
-        messages=[{"role": "user", "content": user}],
+        return (description +
+                f"\n\nYour previous attempt did not validate: {error}\n"
+                "Return a corrected JSON object only.")
+    return description
+
+
+# ── Provider callers (each lazily imports its SDK) ───────────────────
+
+def _missing(provider: str, extra: str) -> RuntimeError:
+    return RuntimeError(f"{provider} drafting needs its SDK: pip install 'chaff[{extra}]'")
+
+
+def _call_anthropic(system: str, user: str) -> str:
+    try:
+        import anthropic
+    except ImportError as e:
+        raise _missing("anthropic", "nl") from e
+    resp = anthropic.Anthropic().messages.create(
+        model=_model("anthropic"), max_tokens=MAX_TOKENS,
+        system=system, messages=[{"role": "user", "content": user}],
     )
     return "".join(b.text for b in resp.content if b.type == "text")
+
+
+def _call_openai(system: str, user: str) -> str:
+    try:
+        from openai import OpenAI
+    except ImportError as e:
+        raise _missing("openai", "nl-openai") from e
+    resp = OpenAI().chat.completions.create(
+        model=_model("openai"),
+        messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+        response_format={"type": "json_object"},  # forces valid JSON
+    )
+    return resp.choices[0].message.content or ""
+
+
+def _call_google(system: str, user: str) -> str:
+    try:
+        import google.generativeai as genai
+    except ImportError as e:
+        raise _missing("google", "nl-google") from e
+    genai.configure(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ["GEMINI_API_KEY"])
+    model = genai.GenerativeModel(_model("google"), system_instruction=system)
+    resp = model.generate_content(
+        user, generation_config={"response_mime_type": "application/json"})
+    return resp.text
+
+
+_CALLERS = {"anthropic": _call_anthropic, "openai": _call_openai, "google": _call_google}
+
+
+def _call_llm(description: str, error: str | None = None) -> str:
+    provider = active_provider()
+    if provider is None:
+        raise RuntimeError(
+            "no LLM API key configured "
+            "(ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY)")
+    return _CALLERS[provider](_system_prompt(), _user_prompt(description, error))
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -79,7 +150,7 @@ def _extract_json(text: str) -> dict[str, Any]:
     return json.loads(text[start:end + 1])
 
 
-def draft_spec(description: str, *, _caller: Callable[..., str] = _call_claude) -> dict[str, Any]:
+def draft_spec(description: str, *, _caller: Callable[..., str] = _call_llm) -> dict[str, Any]:
     """Draft a validated spec dict from a description, with one retry.
 
     `_caller` is injectable so tests can drive the flow without the network.

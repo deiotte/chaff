@@ -49,6 +49,43 @@ def test_extract_json_raises_without_object():
         nl._extract_json("sorry, I can't do that")
 
 
+# ── provider selection ───────────────────────────────────────────────
+
+_KEYS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY")
+
+
+def _clear_keys(monkeypatch):
+    for k in _KEYS:
+        monkeypatch.delenv(k, raising=False)
+
+
+def test_active_provider_none_without_keys(monkeypatch):
+    _clear_keys(monkeypatch)
+    assert nl.active_provider() is None
+
+
+def test_active_provider_detects_each(monkeypatch):
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("GOOGLE_API_KEY", "x")
+    assert nl.active_provider() == "google"
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    assert nl.active_provider() == "openai"   # openai wins over google
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    assert nl.active_provider() == "anthropic"  # anthropic wins over all
+
+
+def test_model_defaults_are_overridable(monkeypatch):
+    assert nl._model("openai") == "gpt-4o"
+    monkeypatch.setenv("CHAFF_OPENAI_MODEL", "gpt-4o-mini")
+    assert nl._model("openai") == "gpt-4o-mini"
+
+
+def test_call_llm_errors_without_any_key(monkeypatch):
+    _clear_keys(monkeypatch)
+    with pytest.raises(RuntimeError, match="no LLM API key"):
+        nl._call_llm("anything")
+
+
 # ── /draft endpoint ──────────────────────────────────────────────────
 
 def _client():
@@ -58,8 +95,18 @@ def _client():
 
 
 def test_draft_endpoint_requires_key(monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _clear_keys(monkeypatch)  # no provider configured
     assert _client().post("/draft", json={"description": "x"}).status_code == 503
+
+
+def test_draft_endpoint_works_with_any_provider(monkeypatch):
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")  # OpenAI alone is enough
+    monkeypatch.setattr(nl, "draft_spec", lambda d: {
+        "name": "via_openai", "rows": 3,
+        "columns": [{"name": "id", "generator": "row_id"}], "output": {"format": "csv"}})
+    r = _client().post("/draft", json={"description": "x"})
+    assert r.status_code == 200 and r.json()["name"] == "via_openai"
 
 
 def test_draft_endpoint_rejects_empty(monkeypatch):
