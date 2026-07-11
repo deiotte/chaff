@@ -104,6 +104,12 @@ docker compose --profile streaming up --build  # + a Kafka broker for sink dev
   references another table's key; chaff generates them in dependency order
   with real referential integrity (customers → orders → lines), one file per
   table. See `examples/retail_orders.json`.
+- **Derived columns** (ADR-0012): a `derived` column computes from other
+  columns in the same row via a safe formula — `total = price * qty`,
+  `tier = 'wholesale' if net > 500 else 'retail'`. No `eval` (formulas are
+  parsed, not run), and it adds zero entropy so seeded output stays
+  byte-identical. The realism unlock: the numbers actually add up. See
+  `examples/orders_with_totals.json`.
 - **Stateful entities** (ADR-0009): an `entity` block turns rows into
   `count × ticks` time-ordered snapshots whose state evolves each tick —
   `movement` (moving lat/lon tracks), `lifecycle` (state transitions),

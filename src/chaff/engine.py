@@ -39,8 +39,10 @@ def _generate_table(rng, faker, columns, n_rows, tables=None) -> list[dict[str, 
     resolved = [(col, get_generator(col.generator)) for col in columns]
     rows: list[dict[str, Any]] = []
     for i in range(n_rows):
-        ctx = GenContext(rng=rng, faker=faker, row_index=i, tables=tables)
+        # `row` is filled in column order; ctx.row is the same dict, so a
+        # `derived` column reads the cells generated before it (ADR-0012).
         row: dict[str, Any] = {}
+        ctx = GenContext(rng=rng, faker=faker, row_index=i, tables=tables, row=row)
         for col, fn in resolved:
             if col.null_rate > 0 and rng.random() < col.null_rate:
                 row[col.name] = None
@@ -138,12 +140,15 @@ def generate_entity_rows(spec: DatasetSpec) -> list[dict[str, Any]]:
     ids: list[Any] = []
     states: list[dict[str, Any]] = []
     for e in range(ent.count):
-        gctx = GenContext(rng=rng, faker=faker, row_index=e)
+        state: dict[str, Any] = {}
+        # ctx.row is the entity's initial-state dict, so a `derived` column can
+        # compute from earlier initial-state columns (ADR-0012). Derived values
+        # are computed once at tick 0; updaters drive per-tick change.
+        gctx = GenContext(rng=rng, faker=faker, row_index=e, row=state)
         if ent.id_pattern:
             ids.append(get_generator("pattern")(gctx, {"pattern": ent.id_pattern}))
         else:
             ids.append(e + 1)
-        state: dict[str, Any] = {}
         for col, fn in state_cols:
             if col.null_rate > 0 and rng.random() < col.null_rate:
                 state[col.name] = None

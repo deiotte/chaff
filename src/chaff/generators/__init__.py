@@ -17,6 +17,8 @@ from typing import Any, Callable
 
 from faker import Faker
 
+from ._expr import FormulaError, referenced_names, safe_eval
+
 GeneratorFn = Callable[["GenContext", dict[str, Any]], Any]
 
 _REGISTRY: dict[str, GeneratorFn] = {}
@@ -52,6 +54,7 @@ class GenContext:
     faker: Faker      # Faker instance seeded from the same seed
     row_index: int    # 0-based row number (drives incrementing ids)
     tables: Any = None  # {table: [rows]} of already-generated parents (fk), else None
+    row: Any = None   # the in-progress row dict (cells generated so far), for `derived`
 
 
 # ── Identity / people ────────────────────────────────────────────────
@@ -400,3 +403,29 @@ def api_key(ctx: GenContext, p: dict) -> str:
     chars = string.ascii_letters + string.digits
     body = "".join(ctx.rng.choice(chars) for _ in range(int(p.get("length", 32))))
     return prefix + body
+
+
+# ── Derived / computed columns (ADR-0012) ────────────────────────────
+
+@generator("derived")
+def derived(ctx: GenContext, p: dict) -> Any:
+    """Compute a value from other cells in the same row via a safe formula.
+    Column names are the variables; the formula never runs as code (see
+    _expr). params: expr (required, e.g. 'price * qty'), precision (optional,
+    round a float result). Add zero entropy, so determinism is untouched.
+
+    Example: {"generator": "derived", "params": {"expr": "price * qty", "precision": 2}}
+    Put a derived column *after* the columns it references.
+    """
+    expr = p.get("expr") or p.get("formula")
+    if not expr:
+        raise FormulaError("derived column needs an 'expr', e.g. {\"expr\": \"price * qty\"}")
+    row = ctx.row or {}
+    # Null in, null out: if any referenced cell is null (null_rate), so is this.
+    if any(row.get(name) is None for name in referenced_names(expr) if name in row):
+        return None
+    value = safe_eval(expr, row)
+    precision = p.get("precision")
+    if precision is not None and isinstance(value, float):
+        value = round(value, int(precision))
+    return value
