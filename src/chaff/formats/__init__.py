@@ -227,6 +227,10 @@ def to_xml(spec: DatasetSpec, rows: list[dict]) -> bytes:
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
+# ── Cursor-on-Target (stdlib, core) ──────────────────────────────────
+from . import cot  # noqa: E402,F401
+
+
 # ── Heavy formats (optional deps under the `formats-extra` extra) ─────
 # Imported for their registration side-effect. Each module registers its
 # encoder at import time WITHOUT importing its heavy dep (that import is

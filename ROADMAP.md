@@ -52,9 +52,10 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       registry (movement/lifecycle/drift) + `EntityContext`, `count × ticks`
       time-ordered snapshots. Deterministic; composes with streaming sinks.
       Examples: `moving_tracks.json`, `order_lifecycle.json`.
-- [ ] Cursor-on-Target (CoT) format encoder — XML events with lat/lon/time;
-      pairs with TCP/UDP/streaming sinks to feed a TAK server live synthetic
-      tracks. Depends on: stateful entities + streaming sinks.
+- [x] Cursor-on-Target (CoT) format encoder — XML events with lat/lon/time,
+      blob + per-record so it streams to a TAK server over TCP/UDP. Event
+      time from the data (base_time + tick), never wall-clock (INV-3).
+      Example: `examples/cot_tracks.json` (moving entities → CoT feed).
 - [ ] Natural-language spec building: describe the dataset in plain English,
       get a draft spec to review/edit (Anthropic API; the UI's NL input box)
 

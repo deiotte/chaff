@@ -40,6 +40,7 @@ _MEDIA_TYPES = {
     "ndjson": "application/x-ndjson",
     "sql": "application/sql",
     "xml": "application/xml",
+    "cot": "application/xml",
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "parquet": "application/vnd.apache.parquet",
     "avro": "application/vnd.apache.avro",
