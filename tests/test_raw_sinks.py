@@ -29,6 +29,7 @@ def test_tcp_and_udp_are_streaming_sinks():
 
 def test_tcp_sink_delivers_all_records():
     received = []
+    done = threading.Event()  # handler signals when it has read the full stream
 
     class Handler(socketserver.BaseRequestHandler):
         def handle(self):
@@ -39,6 +40,7 @@ def test_tcp_sink_delivers_all_records():
                     break
                 buf += chunk
             received.append(buf)
+            done.set()
 
     srv = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
     srv.daemon_threads = True
@@ -46,14 +48,13 @@ def test_tcp_sink_delivers_all_records():
     host, port = srv.server_address
     try:
         receipt = run(stream_spec("tcp", host=host, port=port))
+        # Wait for the handler to actually receive the stream BEFORE tearing the
+        # server down — polling a fixed window raced the accept on a busy runner.
+        assert done.wait(5), "TCP handler never received the connection"
     finally:
         srv.shutdown()
+        srv.server_close()
 
-    # Wait briefly for the handler thread to flush the closed connection.
-    for _ in range(50):
-        if received:
-            break
-        threading.Event().wait(0.02)
     lines = [ln for ln in b"".join(received).decode().splitlines() if ln]
     assert len(lines) == 5
     assert "sent 5 record(s)" in receipt

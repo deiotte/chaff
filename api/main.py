@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from chaff import __version__, library
 from chaff.engine import effective_row_count, generate_records
 from chaff.formats import get_encoder, get_extension, list_formats
-from chaff.generators import list_generators
+from chaff.generators import list_generator_groups, list_generators
 from chaff.sinks import list_sinks
 from chaff.spec import DatasetSpec
 from chaff.updaters import list_updaters
@@ -69,7 +69,8 @@ def _enforce_row_limit(rows: int) -> None:
 def registry():
     """The UI populates its dropdowns from this — never hardcode."""
     return {
-        "generators": list_generators(),
+        "generators": list_generators(),                # flat list (back-compat)
+        "generator_groups": list_generator_groups(),     # grouped for the dropdown
         "formats": list_formats(),
         "sinks": list_sinks(),
         "updaters": list_updaters(),
