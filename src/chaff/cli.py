@@ -40,16 +40,25 @@ def generate(
 @app.command()
 def registry():
     """List registered generators, formats, and sinks."""
+    from .updaters import list_updaters
+
     typer.echo("generators: " + ", ".join(list_generators()))
     typer.echo("formats:    " + ", ".join(list_formats()))
     typer.echo("sinks:      " + ", ".join(list_sinks()))
+    typer.echo("updaters:   " + ", ".join(list_updaters()))
 
 
 @app.command()
 def validate(spec_file: Path = typer.Argument(...)):
     """Validate a spec file without generating anything."""
     spec = load_spec(json.loads(spec_file.read_text()))
-    typer.echo(f"OK: '{spec.name}' — {spec.rows} rows, {len(spec.columns)} columns, "
+    if spec.entity:
+        shape = f"{spec.entity.count} entities × {spec.entity.ticks} ticks"
+    elif spec.tables:
+        shape = f"{1 + len(spec.tables)} tables"
+    else:
+        shape = f"{spec.rows} rows"
+    typer.echo(f"OK: '{spec.name}' — {shape}, {len(spec.columns)} columns, "
                f"{spec.output.format} -> {spec.sink.sink}")
 
 

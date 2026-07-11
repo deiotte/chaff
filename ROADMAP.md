@@ -47,8 +47,11 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       dependency-ordered generation (cycle/missing detection), one file per
       table. Deterministic; single-table path unchanged. CLI-only for now
       (API rejects multi-table). Example: `examples/retail_orders.json`.
-- [ ] Stateful entities over time: tracks that move, lifecycles that
-      transition (`DatasetSpec.entity` seam is reserved for this)
+- [x] Stateful entities over time: tracks that move, lifecycles that
+      transition — `EntitySpec` on the `entity` seam (ADR-0009), `@updater`
+      registry (movement/lifecycle/drift) + `EntityContext`, `count × ticks`
+      time-ordered snapshots. Deterministic; composes with streaming sinks.
+      Examples: `moving_tracks.json`, `order_lifecycle.json`.
 - [ ] Cursor-on-Target (CoT) format encoder — XML events with lat/lon/time;
       pairs with TCP/UDP/streaming sinks to feed a TAK server live synthetic
       tracks. Depends on: stateful entities + streaming sinks.
