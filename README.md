@@ -11,7 +11,24 @@ you need it.
 > chaff produces demo/test data only. It is not a training-data pipeline
 > and will not become one.
 
-## Get it running (2 minutes, no coding)
+## Windows: just download chaff.exe (no Docker, no Python)
+
+The simplest path if you're on Windows. Grab **`chaff.exe`** from the
+[latest release](https://github.com/deiotte/chaff/releases/latest) and
+double-click it.
+
+1. A small console window opens and your browser pops to the chaff UI.
+2. First time only: Windows may show a blue **"Windows protected your PC"**
+   screen (the app isn't code-signed yet) — click **More info → Run anyway**.
+3. Build a dataset, download it. Close the console window to stop chaff.
+
+No install, no terminal. AI drafting ("Describe it in English") works with an
+Anthropic (Claude) or OpenAI (GPT) key pasted into the UI. Every output format
+is included — CSV, Excel, JSON, Parquet, Avro, and more. (See
+[ADR-0014](docs/adr/0014-windows-exe-distribution.md) for the details and
+limitations.)
+
+## Get it running with Docker (any OS, 2 minutes, no coding)
 
 You need [Docker Desktop](https://www.docker.com/products/docker-desktop/)
 installed and running. That's it — no Python, no setup.

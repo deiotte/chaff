@@ -83,6 +83,13 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       `age`, `gender`). Deterministic via `ctx.faker`/`ctx.rng`. Example:
       `examples/employees.json`.
 
+## Phase 5 — Distribution
+- [x] Windows one-click `.exe` (PyInstaller onefile, built in CI on
+      windows-latest, attached to releases) — ADR-0014. Bundles every format
+      + Anthropic/OpenAI drafting; Docker stays the primary cross-platform path.
+- [ ] Code-signing (Authenticode) to drop the SmartScreen "Run anyway" prompt.
+- [ ] macOS `.app` bundle / Windows MSI installer with a Start-menu shortcut.
+
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
 - Data anonymization / production-data masking (that's Tonic's lane; chaff
