@@ -17,9 +17,14 @@ from typing import Any, Callable
 from ..spec import DatasetSpec
 
 EncoderFn = Callable[[DatasetSpec, list[dict[str, Any]]], bytes]
+RecordEncoderFn = Callable[[DatasetSpec, dict[str, Any]], bytes]
 
 _REGISTRY: dict[str, EncoderFn] = {}
 _EXTENSIONS: dict[str, str] = {}
+# Per-record encoders for streaming sinks (ADR-0007). Only record-oriented
+# formats register one; whole-file formats (xlsx, parquet, sql, ...) can't
+# be framed per record and simply don't appear here.
+_RECORD_REGISTRY: dict[str, RecordEncoderFn] = {}
 
 
 def encoder(fmt_id: str, extension: str) -> Callable[[EncoderFn], EncoderFn]:
@@ -32,11 +37,31 @@ def encoder(fmt_id: str, extension: str) -> Callable[[EncoderFn], EncoderFn]:
     return deco
 
 
+def record_encoder(fmt_id: str) -> Callable[[RecordEncoderFn], RecordEncoderFn]:
+    """Register a `(spec, record) -> bytes` encoder for streaming delivery."""
+    def deco(fn: RecordEncoderFn) -> RecordEncoderFn:
+        if fmt_id in _RECORD_REGISTRY:
+            raise ValueError(f"record encoder '{fmt_id}' already registered")
+        _RECORD_REGISTRY[fmt_id] = fn
+        return fn
+    return deco
+
+
 def get_encoder(fmt_id: str) -> EncoderFn:
     try:
         return _REGISTRY[fmt_id]
     except KeyError:
         raise KeyError(f"unknown format '{fmt_id}'. Registered: {sorted(_REGISTRY)}") from None
+
+
+def get_record_encoder(fmt_id: str) -> RecordEncoderFn:
+    try:
+        return _RECORD_REGISTRY[fmt_id]
+    except KeyError:
+        raise KeyError(
+            f"format '{fmt_id}' has no per-record encoder (required for streaming "
+            f"sinks). Streaming-capable formats: {sorted(_RECORD_REGISTRY)}"
+        ) from None
 
 
 def get_extension(fmt_id: str) -> str:
@@ -45,6 +70,10 @@ def get_extension(fmt_id: str) -> str:
 
 def list_formats() -> list[str]:
     return sorted(_REGISTRY)
+
+
+def list_record_formats() -> list[str]:
+    return sorted(_RECORD_REGISTRY)
 
 
 # ── Delimited ────────────────────────────────────────────────────────
@@ -80,8 +109,32 @@ def to_json(spec: DatasetSpec, rows: list[dict]) -> bytes:
 @encoder("ndjson", ".ndjson")
 def to_ndjson(spec: DatasetSpec, rows: list[dict]) -> bytes:
     """One JSON object per line. The streaming-native format: this is what
-    the kafka/http sinks will frame into per-record messages in Phase 2."""
+    the kafka/http sinks frame into per-record messages."""
     return ("\n".join(json.dumps(r, default=str) for r in rows) + "\n").encode("utf-8")
+
+
+# ── Per-record encoders (streaming sinks, ADR-0007) ──────────────────
+# Record-oriented formats expose a `(spec, record) -> bytes` framing. The
+# engine uses these when a streaming sink is selected; whole-file formats
+# (sql, xlsx, parquet, avro, xml) deliberately register none.
+
+@record_encoder("ndjson")
+def _ndjson_record(spec: DatasetSpec, record: dict) -> bytes:
+    return (json.dumps(record, default=str) + "\n").encode("utf-8")
+
+
+@record_encoder("json")
+def _json_record(spec: DatasetSpec, record: dict) -> bytes:
+    return json.dumps(record, default=str).encode("utf-8")
+
+
+@record_encoder("csv")
+def _csv_record(spec: DatasetSpec, record: dict) -> bytes:
+    """One CSV row (no header) in spec-column order, properly quoted."""
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(["" if record[c.name] is None else record[c.name] for c in spec.columns])
+    return buf.getvalue().encode("utf-8")
 
 
 # ── SQL ──────────────────────────────────────────────────────────────
