@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from chaff import __version__
+from chaff import __version__, library
 from chaff.engine import generate_rows
 from chaff.formats import get_encoder, get_extension, list_formats
 from chaff.generators import list_generators
@@ -127,6 +127,47 @@ def generate(spec: DatasetSpec):
             "Content-Length": str(len(payload)),
         },
     )
+
+
+# ── Spec library (presets + saved schemas) ──────────────────────────
+
+@app.get("/library")
+def library_list():
+    """Gallery source: preset + saved spec summaries (never hardcoded)."""
+    return {"specs": library.list_specs()}
+
+
+@app.get("/library/{name}")
+def library_get(name: str):
+    """Full spec for the UI to load into the builder."""
+    try:
+        return library.load_named(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/library/{name}")
+def library_save(name: str, spec: DatasetSpec):
+    """Save the current spec under a name (validated before it persists)."""
+    try:
+        library.save_named(name, spec)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"saved": name}
+
+
+@app.delete("/library/{name}")
+def library_delete(name: str):
+    """Delete a saved schema (presets are read-only)."""
+    try:
+        library.delete_named(name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"deleted": name}
 
 
 # The web UI is a static, build-free page served by this same process

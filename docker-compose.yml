@@ -5,6 +5,7 @@ services:
       - "8000:8000"
     volumes:
       - ./out:/app/out
+      - ./spec-library:/app/spec-library   # saved schemas persist across restarts
 
   # Phase 2 dev fixture (ADR-0005): a broker for kafka sink development.
   # Not a product dependency. `docker compose --profile streaming up`
