@@ -1,0 +1,68 @@
+name: windows-exe
+
+# Builds the one-click Windows chaff.exe (ADR-0014). PyInstaller can't
+# cross-compile, so this runs on a real Windows runner. ci.yml is untouched.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    # Only when something that could break the build changes — not doc-only PRs.
+    paths:
+      - "packaging/**"
+      - "api/**"
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/windows-exe.yml"
+
+jobs:
+  build:
+    name: build chaff.exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install chaff + build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[api,formats-extra,nl,nl-openai]"
+          pip install pyinstaller
+
+      - name: Build onefile exe
+        run: pyinstaller packaging/chaff.spec
+
+      - name: Verify the exe was produced
+        run: |
+          if (-not (Test-Path "dist/chaff.exe")) { throw "chaff.exe not produced" }
+          Get-Item dist/chaff.exe | Format-List Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaff-windows-exe
+          path: dist/chaff.exe
+          if-no-files-found: error
+
+  release:
+    name: attach exe to release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: chaff-windows-exe
+          path: dist
+      - name: Create/update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/chaff.exe
+          fail_on_unmatched_files: true
+          generate_release_notes: true

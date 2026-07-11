@@ -8,6 +8,7 @@ hands them to the engine (INV-1). Run: uvicorn api.main:app --reload
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -233,6 +234,12 @@ def draft(req: DraftRequest):
 
 # The web UI is a static, build-free page served by this same process
 # (ADR-0006). Mounted last so it doesn't shadow the API routes above.
-_STATIC_DIR = Path(__file__).parent / "static"
+# When frozen by PyInstaller (the Windows .exe, ADR-0014), pure-Python modules
+# live in the PYZ archive so __file__ isn't a real on-disk path; the UI is
+# bundled to _MEIPASS/api/static instead. Source runs are unchanged.
+if getattr(sys, "frozen", False):
+    _STATIC_DIR = Path(sys._MEIPASS) / "api" / "static"
+else:
+    _STATIC_DIR = Path(__file__).parent / "static"
 if _STATIC_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(_STATIC_DIR), html=True), name="ui")
