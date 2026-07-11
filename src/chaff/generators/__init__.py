@@ -9,6 +9,7 @@ seed determinism (ADR-0004) true.
 
 from __future__ import annotations
 
+import math
 import string
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -246,3 +247,156 @@ def lorem_sentence(ctx: GenContext, p: dict) -> str:
 @generator("lorem_paragraph")
 def lorem_paragraph(ctx: GenContext, p: dict) -> str:
     return ctx.faker.paragraph(nb_sentences=int(p.get("sentences", 3)))
+
+
+# ── Distributions ────────────────────────────────────────────────────
+# Real-world data is usually skewed, not Gaussian. These make demo charts,
+# dashboards, and ML/anomaly scenarios behave like the real thing. All
+# entropy flows through ctx.rng, so they stay seed-deterministic (INV-3).
+
+@generator("lognormal")
+def lognormal(ctx: GenContext, p: dict) -> float:
+    """Log-normal (skewed positive): incomes, latencies, file sizes.
+
+    params: mu (underlying-normal mean, default 0), sigma (default 1),
+            precision (2), optional min/max clamps.
+    """
+    v = ctx.rng.lognormvariate(float(p.get("mu", 0.0)), float(p.get("sigma", 1.0)))
+    return _clamp_round(v, p)
+
+
+@generator("exponential")
+def exponential(ctx: GenContext, p: dict) -> float:
+    """Exponential: inter-arrival / wait times. params: rate (lambda,
+    default 1.0), precision (4), optional min/max."""
+    v = ctx.rng.expovariate(float(p.get("rate", 1.0)))
+    return _clamp_round(v, p, default_precision=4)
+
+
+@generator("poisson")
+def poisson(ctx: GenContext, p: dict) -> int:
+    """Poisson counts per interval: orders/hour, errors/day.
+
+    params: mean (lambda, default 1.0). Returns a non-negative integer.
+    Knuth's algorithm, driven entirely by ctx.rng (deterministic).
+    """
+    lam = float(p.get("mean", p.get("lam", 1.0)))
+    target = math.exp(-lam)
+    k, product = 0, 1.0
+    while True:
+        k += 1
+        product *= ctx.rng.random()
+        if product <= target:
+            return k - 1
+
+
+@generator("power_law")
+def power_law(ctx: GenContext, p: dict) -> float:
+    """Power-law / Pareto tail: popularity, "80/20", city sizes.
+
+    params: alpha (shape, default 2.0; smaller = heavier tail),
+            scale (multiplier, default 1.0), precision (2), optional min/max.
+    Values are >= scale.
+    """
+    v = ctx.rng.paretovariate(float(p.get("alpha", 2.0))) * float(p.get("scale", 1.0))
+    return _clamp_round(v, p)
+
+
+def _clamp_round(v: float, p: dict, default_precision: int = 2) -> float:
+    if "min" in p:
+        v = max(v, float(p["min"]))
+    if "max" in p:
+        v = min(v, float(p["max"]))
+    return round(v, int(p.get("precision", default_precision)))
+
+
+# ── Web / network / telemetry ────────────────────────────────────────
+# The primitives that make log, event, and API-trace demos look real.
+# Faker-backed where possible (seeded from the same source, INV-3).
+
+@generator("ipv4")
+def ipv4(ctx: GenContext, p: dict) -> str:
+    return ctx.faker.ipv4()
+
+
+@generator("ipv6")
+def ipv6(ctx: GenContext, p: dict) -> str:
+    return ctx.faker.ipv6()
+
+
+@generator("mac_address")
+def mac_address(ctx: GenContext, p: dict) -> str:
+    return ctx.faker.mac_address()
+
+
+@generator("url")
+def url(ctx: GenContext, p: dict) -> str:
+    return ctx.faker.url()
+
+
+@generator("domain")
+def domain(ctx: GenContext, p: dict) -> str:
+    return ctx.faker.domain_name()
+
+
+@generator("username")
+def username(ctx: GenContext, p: dict) -> str:
+    return ctx.faker.user_name()
+
+
+@generator("user_agent")
+def user_agent(ctx: GenContext, p: dict) -> str:
+    return ctx.faker.user_agent()
+
+
+@generator("slug")
+def slug(ctx: GenContext, p: dict) -> str:
+    return ctx.faker.slug()
+
+
+@generator("sha256")
+def sha256(ctx: GenContext, p: dict) -> str:
+    """A hex digest, for commit/content hashes. params: length (default 64)."""
+    return ctx.faker.sha256()[: int(p.get("length", 64))]
+
+
+@generator("http_method")
+def http_method(ctx: GenContext, p: dict) -> str:
+    """params: values/weights override the defaults (GET-heavy)."""
+    values = p.get("values", ["GET", "POST", "PUT", "PATCH", "DELETE"])
+    weights = p.get("weights", [0.6, 0.2, 0.08, 0.05, 0.07])
+    return ctx.rng.choices(values, weights=weights, k=1)[0]
+
+
+@generator("http_status")
+def http_status(ctx: GenContext, p: dict) -> int:
+    """Weighted toward 2xx by default. params: values/weights override."""
+    values = p.get("values", [200, 201, 204, 301, 400, 401, 403, 404, 500, 503])
+    weights = p.get("weights", [0.7, 0.06, 0.04, 0.03, 0.05, 0.03, 0.02, 0.04, 0.02, 0.01])
+    return int(ctx.rng.choices(values, weights=weights, k=1)[0])
+
+
+@generator("port")
+def port(ctx: GenContext, p: dict) -> int:
+    return ctx.rng.randint(int(p.get("min", 1024)), int(p.get("max", 65535)))
+
+
+@generator("ulid")
+def ulid(ctx: GenContext, p: dict) -> str:
+    """ULID-shaped 26-char Crockford base32 id (lexicographically sortable
+    by the time prefix, which is derived deterministically from row_index)."""
+    alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+    time_part = ctx.row_index  # deterministic, monotonically increasing
+    ts = "".join(alphabet[(time_part >> (5 * i)) & 31] for i in range(9, -1, -1))
+    rand = "".join(ctx.rng.choice(alphabet) for _ in range(16))
+    return ts + rand
+
+
+@generator("api_key")
+def api_key(ctx: GenContext, p: dict) -> str:
+    """Fake API-key-shaped token. params: prefix (default 'sk-'),
+    length (random part, default 32)."""
+    prefix = str(p.get("prefix", "sk-"))
+    chars = string.ascii_letters + string.digits
+    body = "".join(ctx.rng.choice(chars) for _ in range(int(p.get("length", 32))))
+    return prefix + body

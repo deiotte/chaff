@@ -1,0 +1,19 @@
+{
+  "name": "web_access_logs",
+  "description": "PRESET: Realistic web access logs — client IPs, methods, 2xx-weighted statuses, lognormal latency, user agents. Shows the distribution + telemetry generators.",
+  "seed": 1337,
+  "rows": 5000,
+  "columns": [
+    {"name": "request_id", "generator": "ulid"},
+    {"name": "ts", "generator": "timestamp_between", "params": {"start": "2026-06-01T00:00:00", "end": "2026-06-02T00:00:00"}},
+    {"name": "client_ip", "generator": "ipv4"},
+    {"name": "method", "generator": "http_method"},
+    {"name": "path", "generator": "slug"},
+    {"name": "status", "generator": "http_status"},
+    {"name": "latency_ms", "generator": "lognormal", "params": {"mu": 3.2, "sigma": 0.9, "min": 1, "precision": 1}},
+    {"name": "bytes", "generator": "power_law", "params": {"alpha": 1.8, "scale": 500, "precision": 0}},
+    {"name": "user_agent", "generator": "user_agent"}
+  ],
+  "output": {"format": "ndjson"},
+  "sink": {"sink": "file", "options": {"path": "out/web_access_logs.ndjson"}}
+}
