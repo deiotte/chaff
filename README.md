@@ -64,9 +64,10 @@ src/chaff/          engine, spec contract, plugin registries
   formats/          pure encoders (+ path rules)
   sinks/            delivery (+ path rules)
   updaters/         per-tick entity updaters (+ path rules)
+  library.py        spec library: presets + saved schemas
 api/                FastAPI transport (main.py) + static UI (static/index.html)
 examples/           preset spec library
-docs/adr/           the five load-bearing decisions
+docs/adr/           the load-bearing decisions
 AGENTS.md           Build DNA — read first
 CLAUDE.md           Claude Code entry point
 ROADMAP.md          phases and backlog

@@ -63,6 +63,24 @@ def validate(spec_file: Path = typer.Argument(...)):
 
 
 @app.command()
+def library(
+    save: Optional[Path] = typer.Option(None, "--save", help="Save a spec file to the library."),
+    name: Optional[str] = typer.Option(None, "--name", help="Name to save under (defaults to spec name)."),
+):
+    """List the spec library, or save a spec into it (--save FILE)."""
+    from . import library as lib
+
+    if save is not None:
+        data = json.loads(save.read_text())
+        saved = lib.save_named(name or data.get("name", ""), data)
+        typer.echo(f"saved -> {saved}")
+        return
+    for s in lib.list_specs():
+        typer.echo(f"[{s['source']:6}] {s['name']}  ({s['rows']} rows, "
+                   f"{s['columns']} cols, {s['format']})")
+
+
+@app.command()
 def version():
     typer.echo(__version__)
 

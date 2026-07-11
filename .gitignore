@@ -10,3 +10,6 @@ venv/
 
 # chaff generated output
 out/
+
+# saved schemas (spec library) — user data, not source
+spec-library/
