@@ -46,6 +46,48 @@ def list_generators() -> list[str]:
     return sorted(_REGISTRY)
 
 
+# Display grouping for UIs. INV-4 still holds: the registry is the source of
+# truth and the UI renders these <optgroup>s — it never hardcodes a list. The
+# order here is the order shown. Every registered generator must land in
+# exactly one group; test_generator_groups.py enforces it, so a new generator
+# can't silently drop out of the dropdown (and a typo'd id here is caught too).
+_GROUP_ORDER: list[tuple[str, list[str]]] = [
+    ("People", ["full_name", "first_name", "last_name", "email", "phone",
+                "username", "company", "job_title", "age", "gender"]),
+    ("Location", ["street_address", "city", "state", "zip_code", "country",
+                  "timezone", "lat", "lon"]),
+    ("Identifiers", ["row_id", "uuid", "ulid", "pattern", "sha256", "api_key"]),
+    ("Numbers & distributions", ["int_range", "float_uniform", "float_normal",
+                                 "money", "lognormal", "exponential", "poisson",
+                                 "power_law"]),
+    ("Categories & dates", ["choice", "choice_weighted", "bool_rate",
+                            "date_between", "timestamp_between"]),
+    ("Text", ["lorem_sentence", "lorem_paragraph", "slug"]),
+    ("Web & network", ["ipv4", "ipv6", "mac_address", "domain", "url",
+                       "user_agent", "http_method", "http_status", "port"]),
+    ("Finance", ["currency_code", "credit_card", "iban"]),
+    ("Relationships", ["fk"]),
+    ("Computed", ["derived"]),
+]
+
+
+def list_generator_groups() -> list[dict[str, Any]]:
+    """Registered generators as ordered display groups: [{group, generators}].
+    Anything registered but not placed above lands in a trailing 'Other' group,
+    so nothing ever disappears from the UI."""
+    placed: set[str] = set()
+    groups: list[dict[str, Any]] = []
+    for name, ids in _GROUP_ORDER:
+        present = [g for g in ids if g in _REGISTRY]
+        placed.update(present)
+        if present:
+            groups.append({"group": name, "generators": present})
+    leftover = sorted(set(_REGISTRY) - placed)
+    if leftover:
+        groups.append({"group": "Other", "generators": leftover})
+    return groups
+
+
 @dataclass
 class GenContext:
     """Per-run context handed to every generator call."""

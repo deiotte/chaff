@@ -138,12 +138,15 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let GENERATORS = [];
+let GEN_GROUPS = [];
 
 // Populate dropdowns from the live registry — never hardcode (INV-4).
 async function loadRegistry() {
   const r = await fetch('/registry');
   const reg = await r.json();
   GENERATORS = reg.generators;
+  // Grouped for the dropdown; fall back to one flat group for older servers.
+  GEN_GROUPS = reg.generator_groups || [{ group: '', generators: reg.generators }];
   const fmt = $('format');
   fmt.innerHTML = reg.formats.map(f => `<option>${f}</option>`).join('');
   addColumn('id', 'row_id');
@@ -155,7 +158,11 @@ async function loadRegistry() {
 }
 
 function generatorOptions(selected) {
-  return GENERATORS.map(g => `<option${g === selected ? ' selected' : ''}>${g}</option>`).join('');
+  const opts = ids => ids.map(g =>
+    `<option${g === selected ? ' selected' : ''}>${g}</option>`).join('');
+  return GEN_GROUPS.map(grp =>
+    grp.group ? `<optgroup label="${grp.group}">${opts(grp.generators)}</optgroup>`
+              : opts(grp.generators)).join('');
 }
 
 // A `derived` column with only an `expr` shows the bare formula (not JSON),
