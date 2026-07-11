@@ -195,13 +195,14 @@ def draft(req: DraftRequest):
     description = req.description.strip()
     if not description:
         raise HTTPException(status_code=400, detail="description is required")
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    from . import nl
+    if nl.active_provider() is None:
         raise HTTPException(
             status_code=503,
-            detail="natural-language drafting needs ANTHROPIC_API_KEY set on the server "
-                   "(install the extra: pip install 'chaff[nl]')",
+            detail="natural-language drafting needs an LLM API key on the server: "
+                   "ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY (install the "
+                   "matching extra: chaff[nl] / chaff[nl-openai] / chaff[nl-google])",
         )
-    from . import nl
     try:
         return nl.draft_spec(description)
     except Exception as e:
