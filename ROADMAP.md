@@ -22,7 +22,9 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
   - [x] GitHub Actions: `make check` + docker build on push
 
 ## Phase 2 — Heavy formats + streaming sinks
-- [ ] Parquet (pyarrow), Avro (fastavro), XML encoders
+- [x] Parquet (pyarrow), Avro (fastavro), XML encoders — deterministic
+      (Avro sync marker + Parquet writer pinned; XML uses `name` attrs so
+      any column name round-trips). pyarrow/fastavro under `formats-extra`.
 - [ ] Streaming sink signature: per-record iterator + rate control (rec/sec)
 - [ ] Kafka sink (confluent-kafka; compose `streaming` profile is the fixture)
 - [ ] HTTP POST sink (single/batch, retry policy, auth header passthrough)

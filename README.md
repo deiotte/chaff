@@ -39,8 +39,9 @@ docker compose --profile streaming up --build
 `spec -> generate -> encode -> sink`
 
 - **Spec is the product** (ADR-0001): UI/CLI/API all just build specs.
-- **Format ≠ sink** (ADR-0002): CSV/TSV/JSON/NDJSON/SQL/XLSX today; Parquet/Avro
-  and Kafka/HTTP delivery in Phase 2 — any format, any compatible sink.
+- **Format ≠ sink** (ADR-0002): CSV/TSV/JSON/NDJSON/SQL/XLSX/XML/Parquet/Avro
+  today; Kafka/HTTP/TCP/UDP delivery landing in Phase 2 — any format, any
+  compatible sink.
 - **Semantic generators** (ADR-0003): "full_name", "pattern: DEA-####-?????",
   "70% Open / 20% Pending / 10% Closed" — not VARCHARs.
 - **Seeded** (ADR-0004): same spec + seed = byte-identical dataset. When the

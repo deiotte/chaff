@@ -117,6 +117,56 @@ def test_xlsx_round_trips_header_and_rows():
     assert ws.max_row == 11  # header + 10 data rows
 
 
+def test_xml_shape_and_determinism():
+    spec = base_spec(rows=6, output={"format": "xml"})
+    a = get_encoder("xml")(spec, generate_rows(spec))
+    b = get_encoder("xml")(spec, generate_rows(spec))
+    assert a == b  # deterministic
+    text = a.decode()
+    assert text.startswith("<?xml")
+    assert '<dataset name="demo_cases">' in text
+    # Column names ride in the name attribute (handles any name verbatim).
+    assert '<field name="case_id">' in text
+    assert text.count("<row>") == 6
+
+
+def test_parquet_deterministic_and_round_trips():
+    import io
+
+    import pytest
+    pq = pytest.importorskip("pyarrow.parquet")
+
+    spec = base_spec(rows=40, output={"format": "parquet"})
+    a = get_encoder("parquet")(spec, generate_rows(spec))
+    b = get_encoder("parquet")(spec, generate_rows(spec))
+    assert a == b  # INV-3
+    table = pq.read_table(io.BytesIO(a))
+    assert table.num_rows == 40
+    assert table.column_names == [c.name for c in spec.columns]
+
+
+def test_avro_deterministic_and_sanitizes_names():
+    import io
+
+    import pytest
+    fastavro = pytest.importorskip("fastavro")
+
+    # A column name with a space must become a valid Avro field name while
+    # preserving the original in `doc`.
+    spec = base_spec(rows=12, output={"format": "avro"}, columns=[
+        {"name": "case id", "generator": "row_id"},
+        {"name": "amount", "generator": "money", "null_rate": 0.2},
+    ])
+    a = get_encoder("avro")(spec, generate_rows(spec))
+    b = get_encoder("avro")(spec, generate_rows(spec))
+    assert a == b  # INV-3: fixed sync marker, no random per-file entropy
+    reader = fastavro.reader(io.BytesIO(a))
+    fields = reader.writer_schema["fields"]
+    assert [f["name"] for f in fields] == ["case_id", "amount"]
+    assert [f["doc"] for f in fields] == ["case id", "amount"]
+    assert len(list(reader)) == 12
+
+
 def test_jenny_egg_rides_the_receipt_only(tmp_path):
     """Fun clause: seed 8675309 nods to Jenny in the receipt, and the
     payload bytes are identical to any other seed's — determinism intact."""

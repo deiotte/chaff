@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import xml.etree.ElementTree as ET
 from typing import Any, Callable
 
 from ..spec import DatasetSpec
@@ -144,8 +145,37 @@ def to_sql(spec: DatasetSpec, rows: list[dict]) -> bytes:
     return ("\n\n".join(out) + "\n").encode("utf-8")
 
 
+# ── XML ──────────────────────────────────────────────────────────────
+
+@encoder("xml", ".xml")
+def to_xml(spec: DatasetSpec, rows: list[dict]) -> bytes:
+    """Row/field XML. Column names ride in a `name` attribute rather than
+    the element tag, so any column name (spaces, punctuation — office Joe
+    types freely) is represented exactly with no tag-sanitizing guesswork.
+
+    options: root_tag (default 'dataset'), row_tag (default 'row').
+
+    <dataset name="...">
+      <row><field name="case_id">DEA-1234-ABCDE</field>...</row>
+    </dataset>
+    """
+    opts = spec.output.options
+    root = ET.Element(str(opts.get("root_tag", "dataset")), {"name": spec.name})
+    row_tag = str(opts.get("row_tag", "row"))
+    cols = [c.name for c in spec.columns]
+    for r in rows:
+        row_el = ET.SubElement(root, row_tag)
+        for c in cols:
+            field = ET.SubElement(row_el, "field", {"name": c})
+            v = r[c]
+            if v is not None:
+                field.text = str(v)
+    ET.indent(root)  # stable, deterministic pretty-print
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
 # ── Heavy formats (optional deps under the `formats-extra` extra) ─────
-# Imported for their registration side-effect. The module registers its
-# encoder at import time WITHOUT importing openpyxl (that import is lazy,
-# inside the encoder), so core `import chaff.formats` stays dep-free.
-from . import excel  # noqa: E402,F401
+# Imported for their registration side-effect. Each module registers its
+# encoder at import time WITHOUT importing its heavy dep (that import is
+# lazy, inside the encoder), so core `import chaff.formats` stays dep-free.
+from . import avro, excel, parquet  # noqa: E402,F401
