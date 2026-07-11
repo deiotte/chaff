@@ -106,17 +106,7 @@ def file_sink(spec: DatasetSpec, payload: bytes) -> str:
     return f"wrote {len(payload)} bytes -> {path}"
 
 
-@sink("kafka")
-def kafka_sink(spec: DatasetSpec, payload: bytes) -> str:
-    raise NotImplementedError(
-        "kafka sink is a later Phase 2 chunk (confluent-kafka producer, "
-        "per-record messages from ndjson/avro, rate control). "
-        "docker-compose.yml already carries a broker under the 'streaming' "
-        "profile. See ROADMAP.md."
-    )
-
-
-# Streaming sinks with heavy/optional deps live in their own modules,
-# imported for their registration side-effect. The heavy import (httpx) is
-# lazy, inside the sink, so core `import chaff.sinks` stays dep-free.
-from . import http  # noqa: E402,F401
+# Streaming sinks registered for their side-effect. `raw` (tcp/udp) is
+# stdlib-only and always available; `http`/`kafka` keep their heavy import
+# (httpx, confluent-kafka) lazy so core `import chaff.sinks` stays dep-free.
+from . import http, kafka, raw  # noqa: E402,F401
