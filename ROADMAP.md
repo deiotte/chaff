@@ -21,7 +21,7 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
         deterministic — zip + doc-props timestamps pinned, INV-3)
   - [x] GitHub Actions: `make check` + docker build on push
 
-## Phase 2 — Heavy formats + streaming sinks
+## Phase 2 — Heavy formats + streaming sinks  ← COMPLETE
 - [x] Parquet (pyarrow), Avro (fastavro), XML encoders — deterministic
       (Avro sync marker + Parquet writer pinned; XML uses `name` attrs so
       any column name round-trips). pyarrow/fastavro under `formats-extra`.
@@ -35,7 +35,9 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
 - [x] HTTP POST sink (single/batch, retry policy, auth header passthrough)
       — `httpx` under the `streaming` extra; 4xx fails loud, 5xx/transport
       retries with backoff, secrets never logged.
-- [ ] TCP/UDP raw sinks
+- [x] TCP/UDP raw sinks — stdlib-only `@stream_sink`s (no extra); TCP
+      surfaces connection-refused loudly, UDP guards the datagram-size
+      limit. Tested against real local listeners.
 
 ## Phase 3 — The fun stuff
 - [ ] Saved/recalled schemas: spec library with named saves (backlog: Karl)
