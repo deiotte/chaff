@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from chaff import __version__
+from chaff import __version__, library
 from chaff.engine import effective_row_count, generate_records
 from chaff.formats import get_encoder, get_extension, list_formats
 from chaff.generators import list_generators
