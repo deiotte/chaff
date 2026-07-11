@@ -64,6 +64,23 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       with one retry. Interface layer (INV-1); engine stays deterministic
       (INV-5). UI "Describe it" box.
 
+## Phase 4 — Richer data sources
+- [x] Statistical distributions: `lognormal`, `exponential`, `poisson`,
+      `power_law` — skewed/real-world shapes so demo data behaves like the
+      real thing (adds to `float_normal`). Deterministic via `ctx.rng`.
+- [x] Web/telemetry generators: `ipv4`, `ipv6`, `mac_address`, `url`,
+      `domain`, `username`, `user_agent`, `slug`, `sha256`, `http_method`,
+      `http_status`, `port`, `ulid`, `api_key`. Example:
+      `examples/web_access_logs.json`.
+- [ ] Derived/computed columns: a column computed from other columns in the
+      same row (`total = price * qty`) — needs `GenContext` to see the
+      in-progress row. The internal-correlation "realism unlock" for ML demos.
+- [ ] Multi-provider NL drafting: OpenAI + Google alongside Anthropic,
+      auto-detected by which API key env var is set.
+- [ ] Tier 2 generators: geo (`country`, `zip_code`, `timezone`), finance
+      (`currency_code`, test `credit_card`, `iban`), people (`job_title`,
+      `age`, `gender`).
+
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
 - Data anonymization / production-data masking (that's Tonic's lane; chaff
