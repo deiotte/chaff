@@ -72,9 +72,19 @@ def registry():
     }
 
 
+def _reject_multitable(spec: DatasetSpec) -> None:
+    if spec.tables:
+        raise HTTPException(
+            status_code=400,
+            detail="multi-table specs aren't supported over the API yet "
+                   "(one request = one file); generate them with the CLI: chaff generate",
+        )
+
+
 @app.post("/preview")
 def preview(spec: DatasetSpec, limit: int = 10):
     """First N rows for the UI's live preview pane."""
+    _reject_multitable(spec)
     limit = max(1, min(limit, PREVIEW_MAX_ROWS))
     capped = spec.model_copy(update={"rows": min(spec.rows, limit)})
     try:
@@ -93,6 +103,7 @@ def generate(spec: DatasetSpec):
     (ndjson/csv straight from the generator) arrives with the Phase 2
     streaming-encoder signature.
     """
+    _reject_multitable(spec)
     _enforce_row_limit(spec.rows)
     try:
         rows = generate_rows(spec)
