@@ -68,6 +68,19 @@
   <section class="card">
     <h2>Describe it <span style="font-weight:400;text-transform:none;letter-spacing:0">— plain English → a draft you can edit</span></h2>
     <textarea id="nlText" rows="2" placeholder="e.g. 500 CRM contacts with name, email, company, city, and a weighted lead status"></textarea>
+    <div class="row3" style="margin-top:10px">
+      <div><label>Your AI API key (paste to enable)</label>
+        <input id="nlKey" type="password" placeholder="sk-... (Anthropic, OpenAI, or Google)" autocomplete="off"></div>
+      <div><label>Service</label>
+        <select id="nlProvider">
+          <option value="">Auto-detect</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI (GPT)</option>
+          <option value="google">Google (Gemini)</option>
+        </select></div>
+      <div></div>
+    </div>
+    <p class="hint">Your key is stored only in this browser and sent straight to the model — never saved on the server. Leave blank if the server already has a key.</p>
     <div class="actions" style="margin-top:10px">
       <button class="btn" id="draftBtn">Draft with AI</button>
       <span class="msg" id="nlMsg"></span>
@@ -309,14 +322,29 @@ async function saveToLibrary() {
 }
 
 // ── Natural-language draft ───────────────────────────────────────
+// The API key lives only in this browser (localStorage), sent with each
+// draft request. It never touches the server's disk.
+function loadKey() {
+  $('nlKey').value = localStorage.getItem('chaff_api_key') || '';
+  $('nlProvider').value = localStorage.getItem('chaff_provider') || '';
+}
+function saveKey() {
+  localStorage.setItem('chaff_api_key', $('nlKey').value.trim());
+  localStorage.setItem('chaff_provider', $('nlProvider').value);
+}
+
 async function doDraft() {
   const description = $('nlText').value.trim();
   const m = $('nlMsg');
   if (!description) { m.className = 'msg err'; m.textContent = 'Describe the dataset first.'; return; }
+  saveKey();
   m.className = 'msg'; m.textContent = 'Drafting…';
+  const body = { description };
+  const key = $('nlKey').value.trim();
+  if (key) { body.api_key = key; body.provider = $('nlProvider').value || undefined; }
   const r = await fetch('/draft', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ description }) });
+    body: JSON.stringify(body) });
   if (!r.ok) { m.className = 'msg err'; m.textContent = await apiError(r); return; }
   loadSpecIntoForm(await r.json());
   m.className = 'msg ok'; m.textContent = 'Drafted — review and tweak below.';
@@ -327,6 +355,9 @@ $('previewBtn').onclick = doPreview;
 $('downloadBtn').onclick = doDownload;
 $('saveBtn').onclick = saveToLibrary;
 $('draftBtn').onclick = doDraft;
+$('nlKey').onchange = saveKey;
+$('nlProvider').onchange = saveKey;
+loadKey();
 loadRegistry();
 refreshLibrary();
 </script>

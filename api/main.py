@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -184,27 +184,48 @@ def library_delete(name: str):
 
 class DraftRequest(BaseModel):
     description: str
+    # Optional bring-your-own-key: pasted in the UI, sent per request, never
+    # stored server-side or logged. When absent, the server's own key is used.
+    api_key: Optional[str] = None
+    provider: Optional[str] = None  # anthropic|openai|google; auto-detected if omitted
 
 
 @app.post("/draft")
 def draft(req: DraftRequest):
     """Draft a spec from plain English for the user to review/edit (INV-1).
 
-    Key comes from the server's ANTHROPIC_API_KEY; the browser never sees it.
+    The key can come from the server env (ANTHROPIC_API_KEY / OPENAI_API_KEY /
+    GOOGLE_API_KEY) or be pasted into the UI and sent with the request. A
+    request key is used for that call only — never written to disk or logged.
     """
     description = req.description.strip()
     if not description:
         raise HTTPException(status_code=400, detail="description is required")
     from . import nl
-    if nl.active_provider() is None:
+
+    key = (req.api_key or "").strip() or None
+    provider = (req.provider or "").strip().lower() or None
+    if provider and provider not in nl.PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown provider '{provider}'; choose one of {list(nl.PROVIDERS)}")
+    if key and not provider:
+        provider = nl.infer_provider(key)
+        if provider is None:
+            raise HTTPException(
+                status_code=400,
+                detail="couldn't tell which service this API key is for — "
+                       "pick Anthropic, OpenAI, or Google in the dropdown")
+    if not key and nl.active_provider() is None:
         raise HTTPException(
             status_code=503,
-            detail="natural-language drafting needs an LLM API key on the server: "
-                   "ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY (install the "
-                   "matching extra: chaff[nl] / chaff[nl-openai] / chaff[nl-google])",
+            detail="natural-language drafting needs an LLM API key: paste one in the "
+                   "UI, or set ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY on "
+                   "the server (install the matching extra: chaff[nl] / chaff[nl-openai] "
+                   "/ chaff[nl-google])",
         )
     try:
-        return nl.draft_spec(description)
+        return nl.draft_spec(description, provider=provider, api_key=key)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"could not draft a valid spec: {e}")
 

@@ -1,10 +1,10 @@
 FROM python:3.12-slim
 WORKDIR /app
 
-# Which optional extras to bake in. Default = API + Anthropic drafting, so the
-# "Describe it in English" button works out of the box once you set a key.
-# OpenAI/Google users rebuild with e.g. CHAFF_EXTRAS=api,nl-openai (see .env.example).
-ARG CHAFF_EXTRAS=api,nl
+# Which optional extras to bake in. Default = API + Anthropic + OpenAI
+# drafting, so a key pasted in the UI (Claude or GPT) works out of the box.
+# Add Google with CHAFF_EXTRAS=api,nl,nl-openai,nl-google (see .env.example).
+ARG CHAFF_EXTRAS=api,nl,nl-openai
 
 COPY pyproject.toml README.md ./
 COPY src/ src/

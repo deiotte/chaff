@@ -37,7 +37,21 @@ When you're done, press `Ctrl+C` in the terminal to stop it.
 
 The **Describe it** box at the top can draft a dataset from a plain sentence
 (e.g. *"500 CRM contacts with name, email, company, and a weighted lead
-status"*). It needs an AI API key. To switch it on:
+status"*). It needs an AI API key — and you just **paste it into the box**:
+
+1. Get a key from Anthropic (Claude), OpenAI (GPT), or Google (Gemini).
+2. Paste it into the **Your AI API key** field under the Describe box.
+3. Type what you want and click **Draft with AI**.
+
+That's it — no files, no restart. Your key is stored **only in your browser**
+and sent straight to the model; chaff never saves it to disk. Claude and GPT
+keys work out of the box; a Google key needs one extra (see below).
+
+<details>
+<summary>Prefer a server-managed key instead? (optional)</summary>
+
+If you'd rather the key live on the server and never touch the browser, set
+it once and skip the paste field:
 
 ```bash
 cp .env.example .env               # make your own settings file
@@ -45,8 +59,12 @@ cp .env.example .env               # make your own settings file
 docker compose up --build          # restart to pick it up
 ```
 
-The key stays on the server — the browser never sees it. Anthropic works out
-of the box; for OpenAI or Google, `.env.example` shows the one extra line.
+For a Google key (either way), add its SDK to the image: set
+`CHAFF_EXTRAS=api,nl,nl-openai,nl-google` in `.env` and rebuild.
+
+> On a shared/hosted deployment, put chaff behind HTTPS so pasted keys aren't
+> sent in the clear.
+</details>
 
 ### Troubleshooting
 
@@ -54,8 +72,8 @@ of the box; for OpenAI or Google, `.env.example` shows the one extra line.
 |---|---|
 | `docker: command not found` | Docker Desktop isn't installed or isn't running. Install it, open it, try again. |
 | `port is already allocated` / page won't load | Something else is on port 8000. Stop it, or change `"8000:8000"` to `"8080:8000"` in `docker-compose.yml` and open http://localhost:8080. |
-| **Describe it** says *"needs an LLM API key"* | No key set. See "Turn on Describe it in English" above. |
-| **Describe it** says *"needs its SDK"* | You set an OpenAI/Google key but built the default (Anthropic) image. Set `CHAFF_EXTRAS` in `.env` (see the file) and `docker compose up --build`. |
+| **Describe it** says *"needs an LLM API key"* | No key available. Paste one into the **Your AI API key** field (see "Turn on Describe it in English"), or set one on the server. |
+| **Describe it** says *"needs its SDK"* | You pasted a **Google** key, whose SDK isn't in the default image. Set `CHAFF_EXTRAS=api,nl,nl-openai,nl-google` in `.env` and `docker compose up --build`. (Claude/GPT keys work with no rebuild.) |
 | Downloaded a preset but the numbers look the same every time | That's the point — same spec + seed = identical data, on purpose (see "Seeded" below). Change the **Seed** field for different data. |
 
 ## For developers (CLI + library)
@@ -94,12 +112,13 @@ docker compose --profile streaming up --build  # + a Kafka broker for sink dev
 - **Spec library**: pick a preset or a saved schema from the UI gallery, load
   it into the builder, tweak, and go. Saves persist under `CHAFF_LIBRARY_DIR`
   (a Docker volume); presets ship in `examples/`.
-- **Describe it in English** (ADR-0010/0011): the UI can draft a spec from a
-  plain sentence via **Anthropic, OpenAI, or Google** — picked by whichever
-  server-side key is set (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
-  `GOOGLE_API_KEY`; extras `nl` / `nl-openai` / `nl-google`). It drafts a
-  *spec* you review and edit — the engine still generates the data
-  deterministically. Not an AI/ML data pipeline (INV-5), just a spec-builder aid.
+- **Describe it in English** (ADR-0010/0011/0013): the UI can draft a spec
+  from a plain sentence via **Anthropic, OpenAI, or Google**. Paste your key
+  straight into the box (stored only in your browser, never saved on the
+  server) — or set a server-side key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+  / `GOOGLE_API_KEY`). It drafts a *spec* you review and edit — the engine
+  still generates the data deterministically. Not an AI/ML data pipeline
+  (INV-5), just a spec-builder aid.
 - **Multi-table** (ADR-0008): add related `tables` and an `fk` column that
   references another table's key; chaff generates them in dependency order
   with real referential integrity (customers → orders → lines), one file per
