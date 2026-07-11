@@ -34,15 +34,32 @@ _MODELS = {
 MAX_TOKENS = 8192
 
 
+PROVIDERS = ("anthropic", "openai", "google")
+
+
 def active_provider() -> str | None:
-    """Which LLM provider a key is configured for, or None. Anthropic wins
-    ties, then OpenAI, then Google."""
+    """Which LLM provider a *server-side* key is configured for, or None.
+    Anthropic wins ties, then OpenAI, then Google."""
     if os.environ.get("ANTHROPIC_API_KEY"):
         return "anthropic"
     if os.environ.get("OPENAI_API_KEY"):
         return "openai"
     if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
         return "google"
+    return None
+
+
+def infer_provider(api_key: str) -> str | None:
+    """Best-effort provider from a pasted key's shape, so the UI can offer
+    "auto-detect": Anthropic keys start `sk-ant-`, Google keys `AIza`,
+    other `sk-` keys are OpenAI. None if it doesn't match a known shape."""
+    key = api_key.strip()
+    if key.startswith("sk-ant"):
+        return "anthropic"
+    if key.startswith("AIza"):
+        return "google"
+    if key.startswith("sk-"):
+        return "openai"
     return None
 
 
@@ -97,24 +114,28 @@ def _missing(provider: str, extra: str) -> RuntimeError:
     return RuntimeError(f"{provider} drafting needs its SDK: pip install 'chaff[{extra}]'")
 
 
-def _call_anthropic(system: str, user: str) -> str:
+# Each caller takes an optional explicit `api_key` (pasted in the UI). When
+# it's None, the SDK falls back to its own env var — so both the server-key
+# path and the bring-your-own-key path share one code path.
+
+def _call_anthropic(system: str, user: str, api_key: str | None = None) -> str:
     try:
         import anthropic
     except ImportError as e:
         raise _missing("anthropic", "nl") from e
-    resp = anthropic.Anthropic().messages.create(
+    resp = anthropic.Anthropic(api_key=api_key).messages.create(
         model=_model("anthropic"), max_tokens=MAX_TOKENS,
         system=system, messages=[{"role": "user", "content": user}],
     )
     return "".join(b.text for b in resp.content if b.type == "text")
 
 
-def _call_openai(system: str, user: str) -> str:
+def _call_openai(system: str, user: str, api_key: str | None = None) -> str:
     try:
         from openai import OpenAI
     except ImportError as e:
         raise _missing("openai", "nl-openai") from e
-    resp = OpenAI().chat.completions.create(
+    resp = OpenAI(api_key=api_key).chat.completions.create(
         model=_model("openai"),
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         response_format={"type": "json_object"},  # forces valid JSON
@@ -122,12 +143,13 @@ def _call_openai(system: str, user: str) -> str:
     return resp.choices[0].message.content or ""
 
 
-def _call_google(system: str, user: str) -> str:
+def _call_google(system: str, user: str, api_key: str | None = None) -> str:
     try:
         import google.generativeai as genai
     except ImportError as e:
         raise _missing("google", "nl-google") from e
-    genai.configure(api_key=os.environ.get("GOOGLE_API_KEY") or os.environ["GEMINI_API_KEY"])
+    key = api_key or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    genai.configure(api_key=key)
     model = genai.GenerativeModel(_model("google"), system_instruction=system)
     resp = model.generate_content(
         user, generation_config={"response_mime_type": "application/json"})
@@ -137,13 +159,18 @@ def _call_google(system: str, user: str) -> str:
 _CALLERS = {"anthropic": _call_anthropic, "openai": _call_openai, "google": _call_google}
 
 
-def _call_llm(description: str, error: str | None = None) -> str:
-    provider = active_provider()
+def _call_llm(description: str, error: str | None = None, *,
+              provider: str | None = None, api_key: str | None = None) -> str:
+    """Dispatch to a provider. An explicit `provider`/`api_key` (from a pasted
+    UI key) wins; otherwise fall back to the server-side env key."""
+    provider = provider or active_provider()
     if provider is None:
         raise RuntimeError(
             "no LLM API key configured "
             "(ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY)")
-    return _CALLERS[provider](_system_prompt(), _user_prompt(description, error))
+    if provider not in _CALLERS:
+        raise RuntimeError(f"unknown provider '{provider}' (choose one of {list(PROVIDERS)})")
+    return _CALLERS[provider](_system_prompt(), _user_prompt(description, error), api_key)
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -154,19 +181,23 @@ def _extract_json(text: str) -> dict[str, Any]:
     return json.loads(text[start:end + 1])
 
 
-def draft_spec(description: str, *, _caller: Callable[..., str] = _call_llm) -> dict[str, Any]:
+def draft_spec(description: str, *, provider: str | None = None,
+               api_key: str | None = None, _caller: Callable[..., str] | None = None) -> dict[str, Any]:
     """Draft a validated spec dict from a description, with one retry.
 
-    `_caller` is injectable so tests can drive the flow without the network.
-    Raises if a valid spec can't be produced in two attempts.
+    `provider`/`api_key` override the server-side key (a key pasted in the
+    UI). `_caller` is injectable so tests can drive the flow without the
+    network. Raises if a valid spec can't be produced in two attempts.
     """
-    raw = _caller(description)
+    caller = _caller or (
+        lambda desc, error=None: _call_llm(desc, error, provider=provider, api_key=api_key))
+    raw = caller(description)
     spec = _extract_json(raw)
     try:
         load_spec(spec)  # validate; the engine only ever sees valid specs
         return spec
     except Exception as first_error:
-        raw = _caller(description, error=str(first_error))
+        raw = caller(description, error=str(first_error))
         spec = _extract_json(raw)
         load_spec(spec)  # raise if still invalid
         return spec

@@ -2,10 +2,10 @@ services:
   chaff:
     build:
       context: .
-      # Swap the LLM SDK baked in without editing files: set CHAFF_EXTRAS in
-      # .env (e.g. api,nl-openai) then `docker compose up --build`.
+      # LLM SDKs baked in. Default covers Anthropic + OpenAI (a key pasted in
+      # the UI just works). Add Google: set CHAFF_EXTRAS in .env, then rebuild.
       args:
-        CHAFF_EXTRAS: ${CHAFF_EXTRAS:-api,nl}
+        CHAFF_EXTRAS: ${CHAFF_EXTRAS:-api,nl,nl-openai}
     ports:
       - "8000:8000"
     # API keys for the "Describe it in English" button. Put one in .env

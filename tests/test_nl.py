@@ -86,6 +86,36 @@ def test_call_llm_errors_without_any_key(monkeypatch):
         nl._call_llm("anything")
 
 
+# ── bring-your-own-key (pasted in the UI) ────────────────────────────
+
+def test_infer_provider_from_key_shape():
+    assert nl.infer_provider("sk-ant-abc123") == "anthropic"
+    assert nl.infer_provider("sk-proj-abc") == "openai"
+    assert nl.infer_provider("sk-abc") == "openai"
+    assert nl.infer_provider("AIzaSyABC") == "google"
+    assert nl.infer_provider("mystery-token") is None
+
+
+def test_draft_spec_threads_provider_and_key(monkeypatch):
+    seen = {}
+
+    def fake_call_llm(desc, error=None, *, provider=None, api_key=None):
+        seen.update(provider=provider, api_key=api_key)
+        return VALID
+
+    monkeypatch.setattr(nl, "_call_llm", fake_call_llm)
+    out = nl.draft_spec("x", provider="openai", api_key="sk-xyz")
+    assert out["name"] == "widgets"
+    assert seen == {"provider": "openai", "api_key": "sk-xyz"}
+
+
+def test_draft_spec_explicit_provider_needs_no_env(monkeypatch):
+    _clear_keys(monkeypatch)  # no server key at all
+    monkeypatch.setattr(nl, "_call_llm",
+                        lambda d, error=None, *, provider=None, api_key=None: VALID)
+    assert nl.draft_spec("x", provider="anthropic", api_key="sk-ant-1")["name"] == "widgets"
+
+
 # ── /draft endpoint ──────────────────────────────────────────────────
 
 def _client():
@@ -102,11 +132,46 @@ def test_draft_endpoint_requires_key(monkeypatch):
 def test_draft_endpoint_works_with_any_provider(monkeypatch):
     _clear_keys(monkeypatch)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")  # OpenAI alone is enough
-    monkeypatch.setattr(nl, "draft_spec", lambda d: {
+    monkeypatch.setattr(nl, "draft_spec", lambda d, **kw: {
         "name": "via_openai", "rows": 3,
         "columns": [{"name": "id", "generator": "row_id"}], "output": {"format": "csv"}})
     r = _client().post("/draft", json={"description": "x"})
     assert r.status_code == 200 and r.json()["name"] == "via_openai"
+
+
+def test_draft_endpoint_accepts_pasted_key_without_server_key(monkeypatch):
+    _clear_keys(monkeypatch)  # server has NO key
+    seen = {}
+    monkeypatch.setattr(nl, "draft_spec", lambda d, **kw: seen.update(kw) or {
+        "name": "byok", "rows": 1,
+        "columns": [{"name": "id", "generator": "row_id"}], "output": {"format": "csv"}})
+    r = _client().post("/draft", json={
+        "description": "x", "api_key": "sk-ant-mykey", "provider": "anthropic"})
+    assert r.status_code == 200 and r.json()["name"] == "byok"
+    assert seen == {"provider": "anthropic", "api_key": "sk-ant-mykey"}
+
+
+def test_draft_endpoint_auto_detects_provider_from_pasted_key(monkeypatch):
+    _clear_keys(monkeypatch)
+    seen = {}
+    monkeypatch.setattr(nl, "draft_spec", lambda d, **kw: seen.update(kw) or {
+        "name": "byok", "rows": 1,
+        "columns": [{"name": "id", "generator": "row_id"}], "output": {"format": "csv"}})
+    r = _client().post("/draft", json={"description": "x", "api_key": "sk-ant-key"})
+    assert r.status_code == 200 and seen["provider"] == "anthropic"
+
+
+def test_draft_endpoint_unrecognized_key_shape_400(monkeypatch):
+    _clear_keys(monkeypatch)
+    r = _client().post("/draft", json={"description": "x", "api_key": "mystery-token"})
+    assert r.status_code == 400
+
+
+def test_draft_endpoint_bad_provider_400(monkeypatch):
+    _clear_keys(monkeypatch)
+    r = _client().post("/draft", json={
+        "description": "x", "api_key": "sk-x", "provider": "wat"})
+    assert r.status_code == 400
 
 
 def test_draft_endpoint_rejects_empty(monkeypatch):
@@ -116,7 +181,7 @@ def test_draft_endpoint_rejects_empty(monkeypatch):
 
 def test_draft_endpoint_returns_spec(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    monkeypatch.setattr(nl, "draft_spec", lambda d: {
+    monkeypatch.setattr(nl, "draft_spec", lambda d, **kw: {
         "name": "drafted", "rows": 5,
         "columns": [{"name": "id", "generator": "row_id"}], "output": {"format": "csv"}})
     r = _client().post("/draft", json={"description": "five ids"})
@@ -126,7 +191,7 @@ def test_draft_endpoint_returns_spec(monkeypatch):
 def test_draft_endpoint_502_when_undraftable(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
 
-    def boom(_):
+    def boom(_, **kw):
         raise RuntimeError("model gave nonsense")
     monkeypatch.setattr(nl, "draft_spec", boom)
     assert _client().post("/draft", json={"description": "x"}).status_code == 502
