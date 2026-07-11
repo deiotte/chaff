@@ -64,7 +64,7 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       with one retry. Interface layer (INV-1); engine stays deterministic
       (INV-5). UI "Describe it" box.
 
-## Phase 4 — Richer data sources
+## Phase 4 — Richer data sources  ← COMPLETE
 - [x] Statistical distributions: `lognormal`, `exponential`, `poisson`,
       `power_law` — skewed/real-world shapes so demo data behaves like the
       real thing (adds to `float_normal`). Deterministic via `ctx.rng`.
@@ -78,9 +78,10 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       internal-correlation "realism unlock" for demos.
 - [x] Multi-provider NL drafting: OpenAI + Google alongside Anthropic,
       auto-detected by which API key env var is set.
-- [ ] Tier 2 generators: geo (`country`, `zip_code`, `timezone`), finance
+- [x] Tier 2 generators: geo (`country`, `zip_code`, `timezone`), finance
       (`currency_code`, test `credit_card`, `iban`), people (`job_title`,
-      `age`, `gender`).
+      `age`, `gender`). Deterministic via `ctx.faker`/`ctx.rng`. Example:
+      `examples/employees.json`.
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)

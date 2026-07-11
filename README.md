@@ -104,9 +104,11 @@ docker compose --profile streaming up --build  # + a Kafka broker for sink dev
   udp/tcp sink = a live synthetic **TAK** feed.
 - **Semantic generators** (ADR-0003): "full_name", "pattern: DEA-####-?????",
   "70% Open / 20% Pending / 10% Closed" — not VARCHARs. Includes real-world
-  **distributions** (lognormal, exponential, poisson, power_law) and
-  **web/telemetry** types (ipv4, user_agent, http_status, ulid, …) so demo
-  data behaves like the real thing. See `examples/web_access_logs.json`.
+  **distributions** (lognormal, exponential, poisson, power_law),
+  **web/telemetry** types (ipv4, user_agent, http_status, ulid, …), and
+  **geo/finance/people** types (country, timezone, currency_code, test
+  credit_card/iban, job_title, age, gender) so demo data behaves like the
+  real thing. See `examples/web_access_logs.json`, `examples/employees.json`.
 - **Seeded** (ADR-0004): same spec + seed = byte-identical dataset. When the
   demo works, you can have that exact data again.
 - **Spec library**: pick a preset or a saved schema from the UI gallery, load
