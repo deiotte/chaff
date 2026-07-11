@@ -1,0 +1,21 @@
+{
+  "name": "employees",
+  "description": "PRESET: A global workforce — people, job titles, ages, locations, pay in local currency. Shows the Tier-2 geo/finance/people generators (plus a derived monthly salary).",
+  "seed": 1337,
+  "rows": 750,
+  "columns": [
+    {"name": "employee_id", "generator": "pattern", "params": {"pattern": "EMP-#####"}},
+    {"name": "name", "generator": "full_name"},
+    {"name": "email", "generator": "email"},
+    {"name": "job_title", "generator": "job_title"},
+    {"name": "age", "generator": "age", "params": {"min": 22, "max": 67}},
+    {"name": "gender", "generator": "gender"},
+    {"name": "country", "generator": "country"},
+    {"name": "timezone", "generator": "timezone"},
+    {"name": "currency", "generator": "currency_code"},
+    {"name": "annual_salary", "generator": "money", "params": {"min": 42000, "max": 210000}},
+    {"name": "monthly_salary", "generator": "derived", "params": {"expr": "round(annual_salary / 12, 2)"}}
+  ],
+  "output": {"format": "csv"},
+  "sink": {"sink": "file", "options": {"path": "out/employees.csv"}}
+}

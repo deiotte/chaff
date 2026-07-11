@@ -429,3 +429,66 @@ def derived(ctx: GenContext, p: dict) -> Any:
     if precision is not None and isinstance(value, float):
         value = round(value, int(precision))
     return value
+
+
+# ── Tier 2: geo / finance / people ───────────────────────────────────
+# All entropy via ctx.faker (seeded from the run seed) or ctx.rng, so these
+# stay byte-for-byte deterministic (INV-3).
+
+@generator("country")
+def country(ctx: GenContext, p: dict) -> str:
+    """Country name, or ISO alpha-2 code with {"as_code": true}."""
+    return ctx.faker.country_code() if p.get("as_code") else ctx.faker.country()
+
+
+@generator("zip_code")
+def zip_code(ctx: GenContext, p: dict) -> str:
+    """Postal/ZIP code (locale-dependent shape)."""
+    return ctx.faker.postcode()
+
+
+@generator("timezone")
+def timezone(ctx: GenContext, p: dict) -> str:
+    """IANA timezone name, e.g. 'America/New_York'."""
+    return ctx.faker.timezone()
+
+
+@generator("currency_code")
+def currency_code(ctx: GenContext, p: dict) -> str:
+    """ISO 4217 currency code, e.g. 'USD'."""
+    return ctx.faker.currency_code()
+
+
+@generator("credit_card")
+def credit_card(ctx: GenContext, p: dict) -> str:
+    """Test credit-card number (Luhn-valid fakes, safe for demos — never real).
+    params: card_type (e.g. 'visa', 'mastercard', 'amex'); default any."""
+    card_type = p.get("card_type")
+    return ctx.faker.credit_card_number(card_type=card_type) if card_type \
+        else ctx.faker.credit_card_number()
+
+
+@generator("iban")
+def iban(ctx: GenContext, p: dict) -> str:
+    """Test IBAN (structurally valid fake)."""
+    return ctx.faker.iban()
+
+
+@generator("job_title")
+def job_title(ctx: GenContext, p: dict) -> str:
+    return ctx.faker.job()
+
+
+@generator("age")
+def age(ctx: GenContext, p: dict) -> int:
+    """Integer age. params: min (default 18), max (default 90)."""
+    return ctx.rng.randint(int(p.get("min", 18)), int(p.get("max", 90)))
+
+
+@generator("gender")
+def gender(ctx: GenContext, p: dict) -> str:
+    """Weighted gender label. params: values/weights override the defaults
+    (Female/Male/Non-binary)."""
+    values = p.get("values", ["Female", "Male", "Non-binary"])
+    weights = p.get("weights", [0.49, 0.49, 0.02])
+    return ctx.rng.choices(values, weights=weights, k=1)[0]
