@@ -25,9 +25,13 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
 - [x] Parquet (pyarrow), Avro (fastavro), XML encoders — deterministic
       (Avro sync marker + Parquet writer pinned; XML uses `name` attrs so
       any column name round-trips). pyarrow/fastavro under `formats-extra`.
-- [ ] Streaming sink signature: per-record iterator + rate control (rec/sec)
+- [x] Streaming sink signature: per-record iterator + rate control (rec/sec)
+      — second `@stream_sink` signature negotiated by the engine (ADR-0007),
+      per-record encoder registry in formats, engine-applied `rate_limited`.
 - [ ] Kafka sink (confluent-kafka; compose `streaming` profile is the fixture)
-- [ ] HTTP POST sink (single/batch, retry policy, auth header passthrough)
+- [x] HTTP POST sink (single/batch, retry policy, auth header passthrough)
+      — `httpx` under the `streaming` extra; 4xx fails loud, 5xx/transport
+      retries with backoff, secrets never logged.
 - [ ] TCP/UDP raw sinks
 
 ## Phase 3 — The fun stuff

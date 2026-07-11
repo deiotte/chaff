@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install (with extras)
-        run: pip install -e '.[dev,api,formats-extra]'
+        run: pip install -e '.[dev,api,formats-extra,streaming]'
       - name: make check
         run: make check
 

@@ -1,45 +1,98 @@
 """Sinks (Axis 2: where bytes go). See sinks/AGENTS.md.
 
-A sink is a callable: (spec: DatasetSpec, payload: bytes) -> str (a
-human-readable receipt: path written, records posted, etc.).
+Two sink shapes, two registries, negotiated by the engine (ADR-0007):
 
-Phase 1 ships `file`. `kafka` and `http` are registered as explicit
-stubs so the CLI can list them and fail with a roadmap pointer instead
-of a mystery KeyError. Streaming sinks will additionally accept a
-per-record iterator + rate control (records/sec) rather than one blob —
-that interface lands with Phase 2 (see ROADMAP.md).
+- **Blob sink** `(spec, payload: bytes) -> str` — the whole encoded
+  payload in one shot. `file` is the canonical one. Register with `@sink`.
+- **Streaming sink** `(spec, records: Iterator[bytes]) -> str` — one
+  encoded record at a time, already rate-paced by the engine. `http`
+  (and, in later chunks, kafka/tcp/udp) are these. Register with
+  `@stream_sink`.
+
+A sink never inspects or transforms payload content (INV-2): a streaming
+sink may *group* record-bytes (batching) and deliver them, but it does
+not parse or re-encode them — the format axis already produced the bytes.
+Rate control is applied once, by the engine, to the iterator it hands the
+sink, so every streaming sink is paced uniformly and none reimplement it.
 """
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable, Iterator
 
 from ..spec import DatasetSpec
 
 SinkFn = Callable[[DatasetSpec, bytes], str]
+StreamSinkFn = Callable[[DatasetSpec, "Iterator[bytes]"], str]
 
 _REGISTRY: dict[str, SinkFn] = {}
+_STREAM_REGISTRY: dict[str, StreamSinkFn] = {}
 
 
 def sink(sink_id: str) -> Callable[[SinkFn], SinkFn]:
     def deco(fn: SinkFn) -> SinkFn:
-        if sink_id in _REGISTRY:
-            raise ValueError(f"sink '{sink_id}' already registered")
+        _guard(sink_id)
         _REGISTRY[sink_id] = fn
         return fn
     return deco
+
+
+def stream_sink(sink_id: str) -> Callable[[StreamSinkFn], StreamSinkFn]:
+    def deco(fn: StreamSinkFn) -> StreamSinkFn:
+        _guard(sink_id)
+        _STREAM_REGISTRY[sink_id] = fn
+        return fn
+    return deco
+
+
+def _guard(sink_id: str) -> None:
+    if sink_id in _REGISTRY or sink_id in _STREAM_REGISTRY:
+        raise ValueError(f"sink '{sink_id}' already registered")
 
 
 def get_sink(sink_id: str) -> SinkFn:
     try:
         return _REGISTRY[sink_id]
     except KeyError:
-        raise KeyError(f"unknown sink '{sink_id}'. Registered: {sorted(_REGISTRY)}") from None
+        raise KeyError(f"unknown sink '{sink_id}'. Registered: {list_sinks()}") from None
+
+
+def get_stream_sink(sink_id: str) -> StreamSinkFn:
+    try:
+        return _STREAM_REGISTRY[sink_id]
+    except KeyError:
+        raise KeyError(f"unknown streaming sink '{sink_id}'. Registered: {list_sinks()}") from None
+
+
+def is_stream_sink(sink_id: str) -> bool:
+    return sink_id in _STREAM_REGISTRY
 
 
 def list_sinks() -> list[str]:
-    return sorted(_REGISTRY)
+    return sorted(set(_REGISTRY) | set(_STREAM_REGISTRY))
+
+
+def rate_limited(
+    items: Iterable[bytes],
+    rate: float | None,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Iterator[bytes]:
+    """Yield `items` no faster than `rate` per second (records/sec).
+
+    `rate` None/<=0 means unthrottled. Pacing is delivery timing only — it
+    never touches generation, the RNG, or payload bytes, so INV-3 is
+    unaffected. `sleep` is injectable so tests pace against a fake clock.
+    """
+    interval = 1.0 / float(rate) if rate and rate > 0 else 0.0
+    first = True
+    for item in items:
+        if not first and interval:
+            sleep(interval)
+        first = False
+        yield item
 
 
 @sink("file")
@@ -53,18 +106,17 @@ def file_sink(spec: DatasetSpec, payload: bytes) -> str:
     return f"wrote {len(payload)} bytes -> {path}"
 
 
-@sink("http")
-def http_sink(spec: DatasetSpec, payload: bytes) -> str:
-    raise NotImplementedError(
-        "http sink is Phase 2 (POST per record or batch to a developer's "
-        "endpoint, with records/sec rate control). See ROADMAP.md."
-    )
-
-
 @sink("kafka")
 def kafka_sink(spec: DatasetSpec, payload: bytes) -> str:
     raise NotImplementedError(
-        "kafka sink is Phase 2 (confluent-kafka producer, per-record "
-        "messages from ndjson/avro, rate control). docker-compose.yml "
-        "already carries a broker under the 'streaming' profile. See ROADMAP.md."
+        "kafka sink is a later Phase 2 chunk (confluent-kafka producer, "
+        "per-record messages from ndjson/avro, rate control). "
+        "docker-compose.yml already carries a broker under the 'streaming' "
+        "profile. See ROADMAP.md."
     )
+
+
+# Streaming sinks with heavy/optional deps live in their own modules,
+# imported for their registration side-effect. The heavy import (httpx) is
+# lazy, inside the sink, so core `import chaff.sinks` stays dep-free.
+from . import http  # noqa: E402,F401
