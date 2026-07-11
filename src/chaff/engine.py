@@ -22,6 +22,7 @@ from .formats import get_encoder, get_extension, get_record_encoder
 from .generators import GenContext, get_generator
 from .sinks import get_sink, get_stream_sink, is_stream_sink, rate_limited
 from .spec import DatasetSpec
+from .updaters import EntityContext, get_updater
 
 
 def _seeded(spec: DatasetSpec) -> tuple[random.Random, Faker]:
@@ -119,6 +120,65 @@ def generate_tables(spec: DatasetSpec) -> dict[str, list[dict[str, Any]]]:
     return result
 
 
+# ── Stateful entities (ADR-0009) ─────────────────────────────────────
+
+def generate_entity_rows(spec: DatasetSpec) -> list[dict[str, Any]]:
+    """Generate `count` entities over `ticks` time steps.
+
+    Each entity's initial state comes from the spec's columns (tick 0), then
+    per-tick `updates` mutate it. Output is one snapshot per (tick, entity),
+    time-ordered (all entities at tick 0, then tick 1, …). Deterministic: one
+    rng/faker seeded once and consumed in a fixed order.
+    """
+    ent = spec.entity
+    rng, faker = _seeded(spec)
+    state_cols = [(col, get_generator(col.generator)) for col in spec.columns]
+    updates = [(get_updater(u.updater), u.params) for u in ent.updates]  # fail fast
+
+    ids: list[Any] = []
+    states: list[dict[str, Any]] = []
+    for e in range(ent.count):
+        gctx = GenContext(rng=rng, faker=faker, row_index=e)
+        if ent.id_pattern:
+            ids.append(get_generator("pattern")(gctx, {"pattern": ent.id_pattern}))
+        else:
+            ids.append(e + 1)
+        state: dict[str, Any] = {}
+        for col, fn in state_cols:
+            if col.null_rate > 0 and rng.random() < col.null_rate:
+                state[col.name] = None
+            else:
+                state[col.name] = fn(gctx, col.params)
+        states.append(state)
+
+    rows: list[dict[str, Any]] = []
+    for t in range(ent.ticks):
+        if t > 0:
+            for e in range(ent.count):
+                ectx = EntityContext(rng=rng, faker=faker, entity_index=e, tick=t)
+                for upd_fn, params in updates:
+                    upd_fn(ectx, states[e], params)
+        for e in range(ent.count):
+            row = {ent.id_column: ids[e], ent.tick_column: t}
+            row.update(states[e])  # snapshot of current state
+            rows.append(row)
+    return rows
+
+
+def generate_records(spec: DatasetSpec) -> list[dict[str, Any]]:
+    """Rows for a single-table or entity spec (not multi-table). The one
+    entry point the API/preview use so both modes are handled uniformly."""
+    return generate_entity_rows(spec) if spec.entity else generate_rows(spec)
+
+
+def effective_row_count(spec: DatasetSpec) -> int:
+    """How many rows a spec will actually emit (entities × ticks for an
+    entity spec), for request-size limits."""
+    if spec.entity:
+        return spec.entity.count * spec.entity.ticks
+    return spec.rows
+
+
 # Fun clause (AGENTS.md §5): seed 8675309 tips its hat to Jenny. Receipt
 # only — the payload bytes are untouched, so seed determinism is unharmed.
 _JENNY = 8675309
@@ -136,7 +196,7 @@ def run(spec: DatasetSpec) -> str:
     if spec.tables:
         return _run_multi(spec)
 
-    rows = generate_rows(spec)
+    rows = generate_records(spec)  # single-table or entity ticks
     sink_id = spec.sink.sink
 
     if is_stream_sink(sink_id):

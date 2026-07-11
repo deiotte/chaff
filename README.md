@@ -50,6 +50,11 @@ docker compose --profile streaming up --build
   references another table's key; chaff generates them in dependency order
   with real referential integrity (customers → orders → lines), one file per
   table. See `examples/retail_orders.json`.
+- **Stateful entities** (ADR-0009): an `entity` block turns rows into
+  `count × ticks` time-ordered snapshots whose state evolves each tick —
+  `movement` (moving lat/lon tracks), `lifecycle` (state transitions),
+  `drift` (sensor walk). Pairs with a streaming sink for a live feed. See
+  `examples/moving_tracks.json`, `examples/order_lifecycle.json`.
 
 ## Repo map
 
@@ -58,6 +63,7 @@ src/chaff/          engine, spec contract, plugin registries
   generators/       semantic value generators (+ path rules)
   formats/          pure encoders (+ path rules)
   sinks/            delivery (+ path rules)
+  updaters/         per-tick entity updaters (+ path rules)
   library.py        spec library: presets + saved schemas
 api/                FastAPI transport (main.py) + static UI (static/index.html)
 examples/           preset spec library

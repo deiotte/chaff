@@ -78,6 +78,33 @@ class TableSpec(BaseModel):
         return _reject_duplicate_columns(v)
 
 
+class UpdateSpec(BaseModel):
+    """One per-tick update rule applied to an entity's state (ADR-0009)."""
+
+    updater: str = Field(..., description="Registered updater id: movement, lifecycle, drift, ...")
+    params: dict[str, Any] = Field(default_factory=dict, description="Updater-specific parameters.")
+
+
+class EntitySpec(BaseModel):
+    """Stateful entities that evolve over time (Phase 3, ADR-0009).
+
+    When present, the engine stops generating independent rows and instead
+    creates `count` entities, each with initial state from the spec's
+    `columns`, then advances them `ticks` times applying `updates`. Output
+    is one snapshot row per (tick, entity): `entities × ticks` rows, time
+    ordered. The top-level `rows` is ignored in this mode.
+    """
+
+    count: int = Field(..., ge=1, le=1_000_000, description="Number of entities.")
+    ticks: int = Field(..., ge=1, le=1_000_000, description="Snapshots per entity (time steps).")
+    id_column: str = Field("entity_id", description="Output column carrying the entity id.")
+    id_pattern: Optional[str] = Field(
+        None, description="Pattern for entity ids (see the `pattern` generator); default is sequential ints."
+    )
+    tick_column: str = Field("tick", description="Output column carrying the 0-based tick number.")
+    updates: list[UpdateSpec] = Field(default_factory=list, description="Per-tick update rules, applied in order.")
+
+
 class DatasetSpec(BaseModel):
     """The whole contract. Serialize to JSON, save it, share it, version it."""
 
@@ -85,7 +112,7 @@ class DatasetSpec(BaseModel):
     name: str = Field(..., min_length=1, description="Dataset/table name; used by SQL encoder and filenames.")
     description: Optional[str] = Field(None, description="Human context; shown in the preset library UI.")
     seed: Optional[int] = Field(None, description="RNG seed. Set it and the dataset is reproducible byte-for-byte.")
-    rows: int = Field(..., ge=1, le=10_000_000, description="Record count.")
+    rows: Optional[int] = Field(None, ge=1, le=10_000_000, description="Record count. Not used when `entity` is set.")
     columns: list[ColumnSpec] = Field(..., min_length=1)
     output: OutputSpec
     sink: SinkSpec = Field(default_factory=SinkSpec)
@@ -97,15 +124,23 @@ class DatasetSpec(BaseModel):
         None, description="Additional related tables; use `fk` columns for referential integrity."
     )
 
-    # Reserved for Phase 3 — stateful entities that evolve over time.
-    # Presence of `entity` will switch the engine from independent-row
-    # generation to per-entity update loops (tracks, lifecycles, sensors).
-    entity: Optional[dict[str, Any]] = Field(None, description="RESERVED (Phase 3): stateful entity config.")
+    # Stateful entities that evolve over time (Phase 3, ADR-0009). Presence
+    # switches the engine from independent-row generation to per-entity
+    # update loops (tracks, lifecycles, sensors). Absent => unchanged.
+    entity: Optional[EntitySpec] = Field(None, description="Stateful entity config (ADR-0009).")
 
     @field_validator("columns")
     @classmethod
     def column_names_unique(cls, v: list[ColumnSpec]) -> list[ColumnSpec]:
         return _reject_duplicate_columns(v)
+
+    @model_validator(mode="after")
+    def _rows_required_without_entity(self) -> "DatasetSpec":
+        # `rows` drives independent-row generation; entity specs derive their
+        # length from count × ticks instead, so rows is optional there.
+        if self.entity is None and self.rows is None:
+            raise ValueError("rows is required (except for entity specs, which use count × ticks)")
+        return self
 
     @model_validator(mode="after")
     def _table_names_unique(self) -> "DatasetSpec":

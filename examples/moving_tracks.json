@@ -1,0 +1,23 @@
+{
+  "name": "moving_tracks",
+  "description": "PRESET: Stateful entities — 10 tracks moving over 30 ticks (lat/lon drift along a heading). NDJSON; pair with a streaming sink to feed live positions.",
+  "seed": 8675309,
+  "columns": [
+    {"name": "lat", "generator": "lat", "params": {"min": 34.00, "max": 34.20}},
+    {"name": "lon", "generator": "lon", "params": {"min": -118.60, "max": -118.30}},
+    {"name": "heading", "generator": "int_range", "params": {"min": 0, "max": 359}},
+    {"name": "callsign", "generator": "pattern", "params": {"pattern": "TRK-###"}}
+  ],
+  "output": {"format": "ndjson"},
+  "sink": {"sink": "file", "options": {"path": "out/moving_tracks.ndjson"}},
+  "entity": {
+    "count": 10,
+    "ticks": 30,
+    "id_column": "track_id",
+    "id_pattern": "UNIT-####",
+    "tick_column": "t",
+    "updates": [
+      {"updater": "movement", "params": {"speed": 0.01, "turn_stddev": 12}}
+    ]
+  }
+}

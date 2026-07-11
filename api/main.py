@@ -15,12 +15,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from chaff import __version__, library
-from chaff.engine import generate_rows
+from chaff import __version__
+from chaff.engine import effective_row_count, generate_records
 from chaff.formats import get_encoder, get_extension, list_formats
 from chaff.generators import list_generators
 from chaff.sinks import list_sinks
 from chaff.spec import DatasetSpec
+from chaff.updaters import list_updaters
 
 app = FastAPI(title="chaff", version=__version__)
 
@@ -69,6 +70,7 @@ def registry():
         "generators": list_generators(),
         "formats": list_formats(),
         "sinks": list_sinks(),
+        "updaters": list_updaters(),
     }
 
 
@@ -86,9 +88,15 @@ def preview(spec: DatasetSpec, limit: int = 10):
     """First N rows for the UI's live preview pane."""
     _reject_multitable(spec)
     limit = max(1, min(limit, PREVIEW_MAX_ROWS))
-    capped = spec.model_copy(update={"rows": min(spec.rows, limit)})
+    if spec.entity:
+        # Bound preview work for entity specs: a few entities over a few ticks.
+        capped_entity = spec.entity.model_copy(update={
+            "count": min(spec.entity.count, limit), "ticks": min(spec.entity.ticks, limit)})
+        capped = spec.model_copy(update={"entity": capped_entity})
+    else:
+        capped = spec.model_copy(update={"rows": min(spec.rows, limit)})
     try:
-        return {"rows": generate_rows(capped)}
+        return {"rows": generate_records(capped)[:limit]}
     except KeyError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -104,9 +112,9 @@ def generate(spec: DatasetSpec):
     streaming-encoder signature.
     """
     _reject_multitable(spec)
-    _enforce_row_limit(spec.rows)
+    _enforce_row_limit(effective_row_count(spec))
     try:
-        rows = generate_rows(spec)
+        rows = generate_records(spec)
         payload = get_encoder(spec.output.format)(spec, rows)
         ext = get_extension(spec.output.format)
     except KeyError as e:
