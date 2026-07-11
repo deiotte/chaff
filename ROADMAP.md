@@ -75,8 +75,8 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
 - [ ] Derived/computed columns: a column computed from other columns in the
       same row (`total = price * qty`) — needs `GenContext` to see the
       in-progress row. The internal-correlation "realism unlock" for ML demos.
-- [ ] Multi-provider NL drafting: OpenAI + Google alongside Anthropic,
-      auto-detected by which API key env var is set.
+- [x] Multi-provider NL drafting: OpenAI + Google alongside Anthropic,
+      auto-detected by which API key env var is set (ADR-0011).
 - [ ] Tier 2 generators: geo (`country`, `zip_code`, `timezone`), finance
       (`currency_code`, test `credit_card`, `iban`), people (`job_title`,
       `age`, `gender`).
