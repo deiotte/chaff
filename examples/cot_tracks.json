@@ -1,0 +1,32 @@
+{
+  "name": "cot_tracks",
+  "description": "PRESET: Cursor-on-Target feed — 8 tracks moving over 60 ticks, emitted as CoT XML events. Swap the sink for tcp/udp to feed a live TAK server.",
+  "seed": 8675309,
+  "columns": [
+    {"name": "lat", "generator": "lat", "params": {"min": 34.00, "max": 34.30}},
+    {"name": "lon", "generator": "lon", "params": {"min": -118.70, "max": -118.20}},
+    {"name": "heading", "generator": "int_range", "params": {"min": 0, "max": 359}},
+    {"name": "callsign", "generator": "pattern", "params": {"pattern": "RAVEN-##"}}
+  ],
+  "output": {
+    "format": "cot",
+    "options": {
+      "tick_column": "t",
+      "base_time": "2026-01-01T00:00:00Z",
+      "interval_seconds": 5,
+      "stale_seconds": 30,
+      "type": "a-f-A-M-F-Q"
+    }
+  },
+  "sink": {"sink": "file", "options": {"path": "out/cot_tracks.cot"}},
+  "entity": {
+    "count": 8,
+    "ticks": 60,
+    "id_column": "uid",
+    "id_pattern": "RAVEN-##",
+    "tick_column": "t",
+    "updates": [
+      {"updater": "movement", "params": {"speed": 0.008, "turn_stddev": 8}}
+    ]
+  }
+}
