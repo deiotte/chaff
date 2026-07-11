@@ -14,6 +14,7 @@ from typing import Iterator
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from chaff import __version__, library
 from chaff.engine import effective_row_count, generate_records
@@ -177,6 +178,34 @@ def library_delete(name: str):
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"deleted": name}
+
+
+# ── Natural-language spec drafting (ADR-0010) ────────────────────────
+
+class DraftRequest(BaseModel):
+    description: str
+
+
+@app.post("/draft")
+def draft(req: DraftRequest):
+    """Draft a spec from plain English for the user to review/edit (INV-1).
+
+    Key comes from the server's ANTHROPIC_API_KEY; the browser never sees it.
+    """
+    description = req.description.strip()
+    if not description:
+        raise HTTPException(status_code=400, detail="description is required")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(
+            status_code=503,
+            detail="natural-language drafting needs ANTHROPIC_API_KEY set on the server "
+                   "(install the extra: pip install 'chaff[nl]')",
+        )
+    from . import nl
+    try:
+        return nl.draft_spec(description)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"could not draft a valid spec: {e}")
 
 
 # The web UI is a static, build-free page served by this same process

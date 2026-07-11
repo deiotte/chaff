@@ -66,6 +66,15 @@
 
 <main>
   <section class="card">
+    <h2>Describe it <span style="font-weight:400;text-transform:none;letter-spacing:0">— plain English → a draft you can edit</span></h2>
+    <textarea id="nlText" rows="2" placeholder="e.g. 500 CRM contacts with name, email, company, city, and a weighted lead status"></textarea>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn" id="draftBtn">Draft with AI</button>
+      <span class="msg" id="nlMsg"></span>
+    </div>
+  </section>
+
+  <section class="card">
     <h2>Library <span style="font-weight:400;text-transform:none;letter-spacing:0">— pick a preset or a saved schema to start</span></h2>
     <div id="gallery" class="gallery"><div class="empty">Loading…</div></div>
     <div class="save-row">
@@ -275,10 +284,25 @@ async function saveToLibrary() {
   if (r.ok) refreshLibrary();
 }
 
+// ── Natural-language draft ───────────────────────────────────────
+async function doDraft() {
+  const description = $('nlText').value.trim();
+  const m = $('nlMsg');
+  if (!description) { m.className = 'msg err'; m.textContent = 'Describe the dataset first.'; return; }
+  m.className = 'msg'; m.textContent = 'Drafting…';
+  const r = await fetch('/draft', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ description }) });
+  if (!r.ok) { m.className = 'msg err'; m.textContent = await apiError(r); return; }
+  loadSpecIntoForm(await r.json());
+  m.className = 'msg ok'; m.textContent = 'Drafted — review and tweak below.';
+}
+
 $('addCol').onclick = () => addColumn();
 $('previewBtn').onclick = doPreview;
 $('downloadBtn').onclick = doDownload;
 $('saveBtn').onclick = saveToLibrary;
+$('draftBtn').onclick = doDraft;
 loadRegistry();
 refreshLibrary();
 </script>

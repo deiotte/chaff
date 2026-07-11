@@ -39,9 +39,11 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       surfaces connection-refused loudly, UDP guards the datagram-size
       limit. Tested against real local listeners.
 
-## Phase 3 — The fun stuff
-- [ ] Saved/recalled schemas: spec library with named saves (backlog: Karl)
-- [ ] Preset gallery in UI: pick a predefined schema and go (backlog: Karl)
+## Phase 3 — The fun stuff  ← COMPLETE
+- [x] Saved/recalled schemas: spec library with named saves — `chaff/library.py`
+      (presets + writable saves), `/library` API, `chaff library` CLI.
+- [x] Preset gallery in UI: pick a predefined schema and go — gallery cards
+      from `/library`, click loads the spec into the builder, save-to-library.
 - [x] Multi-table specs with FK integrity (customers -> orders -> lines)
       — `TableSpec` + `DatasetSpec.tables` (ADR-0008), `fk` generator,
       dependency-ordered generation (cycle/missing detection), one file per
@@ -56,8 +58,11 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       blob + per-record so it streams to a TAK server over TCP/UDP. Event
       time from the data (base_time + tick), never wall-clock (INV-3).
       Example: `examples/cot_tracks.json` (moving entities → CoT feed).
-- [ ] Natural-language spec building: describe the dataset in plain English,
-      get a draft spec to review/edit (Anthropic API; the UI's NL input box)
+- [x] Natural-language spec building: describe the dataset in plain English,
+      get a draft spec to review/edit — `api/nl.py` + `/draft` (ADR-0010),
+      Anthropic API with a server-side key, JSON validated via `load_spec`
+      with one retry. Interface layer (INV-1); engine stays deterministic
+      (INV-5). UI "Describe it" box.
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
