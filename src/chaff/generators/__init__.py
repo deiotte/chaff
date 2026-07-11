@@ -50,6 +50,7 @@ class GenContext:
     rng: Any          # random.Random seeded once per run
     faker: Faker      # Faker instance seeded from the same seed
     row_index: int    # 0-based row number (drives incrementing ids)
+    tables: Any = None  # {table: [rows]} of already-generated parents (fk), else None
 
 
 # ── Identity / people ────────────────────────────────────────────────
@@ -142,6 +143,28 @@ def pattern(ctx: GenContext, p: dict) -> str:
         else:
             out.append(ch)
     return "".join(out)
+
+
+# ── Relationships (multi-table FK, ADR-0008) ─────────────────────────
+
+@generator("fk")
+def fk(ctx: GenContext, p: dict) -> Any:
+    """Foreign key: a value drawn from a parent table's column.
+
+    params: table (parent table name), column (its key column). The parent
+    must be generated before this table — the engine orders generation by
+    FK dependency, so a valid reference always exists. Value is picked with
+    ctx.rng, so it stays deterministic under a fixed seed.
+
+    Example: {"table": "customers", "column": "customer_id"}
+    """
+    table, column = p["table"], p["column"]
+    if ctx.tables is None or table not in ctx.tables:
+        raise KeyError(f"fk references unknown/ungenerated table '{table}'")
+    parent = ctx.tables[table]
+    if not parent:
+        raise ValueError(f"fk parent table '{table}' produced no rows")
+    return ctx.rng.choice(parent)[column]
 
 
 # ── Numbers ──────────────────────────────────────────────────────────

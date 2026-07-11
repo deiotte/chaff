@@ -46,6 +46,10 @@ docker compose --profile streaming up --build
   "70% Open / 20% Pending / 10% Closed" — not VARCHARs.
 - **Seeded** (ADR-0004): same spec + seed = byte-identical dataset. When the
   demo works, you can have that exact data again.
+- **Multi-table** (ADR-0008): add related `tables` and an `fk` column that
+  references another table's key; chaff generates them in dependency order
+  with real referential integrity (customers → orders → lines), one file per
+  table. See `examples/retail_orders.json`.
 
 ## Repo map
 

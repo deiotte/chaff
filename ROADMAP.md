@@ -42,7 +42,11 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
 ## Phase 3 — The fun stuff
 - [ ] Saved/recalled schemas: spec library with named saves (backlog: Karl)
 - [ ] Preset gallery in UI: pick a predefined schema and go (backlog: Karl)
-- [ ] Multi-table specs with FK integrity (customers -> orders -> lines)
+- [x] Multi-table specs with FK integrity (customers -> orders -> lines)
+      — `TableSpec` + `DatasetSpec.tables` (ADR-0008), `fk` generator,
+      dependency-ordered generation (cycle/missing detection), one file per
+      table. Deterministic; single-table path unchanged. CLI-only for now
+      (API rejects multi-table). Example: `examples/retail_orders.json`.
 - [ ] Stateful entities over time: tracks that move, lifecycles that
       transition (`DatasetSpec.entity` seam is reserved for this)
 - [ ] Cursor-on-Target (CoT) format encoder — XML events with lat/lon/time;
