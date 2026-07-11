@@ -40,8 +40,11 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       limit. Tested against real local listeners.
 
 ## Phase 3 — The fun stuff
-- [ ] Saved/recalled schemas: spec library with named saves (backlog: Karl)
-- [ ] Preset gallery in UI: pick a predefined schema and go (backlog: Karl)
+- [x] Saved/recalled schemas: spec library with named saves — `chaff/library.py`
+      (presets + writable saves, env-configurable dirs, safe-name guard),
+      `/library` API, `chaff library` CLI.
+- [x] Preset gallery in UI: pick a predefined schema and go — gallery cards
+      from `/library`, click loads the spec into the builder, save-to-library.
 - [ ] Multi-table specs with FK integrity (customers -> orders -> lines)
 - [ ] Stateful entities over time: tracks that move, lifecycles that
       transition (`DatasetSpec.entity` seam is reserved for this)

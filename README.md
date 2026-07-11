@@ -46,6 +46,9 @@ docker compose --profile streaming up --build
   "70% Open / 20% Pending / 10% Closed" — not VARCHARs.
 - **Seeded** (ADR-0004): same spec + seed = byte-identical dataset. When the
   demo works, you can have that exact data again.
+- **Spec library**: pick a preset or a saved schema from the UI gallery, load
+  it into the builder, tweak, and go. Saves persist under `CHAFF_LIBRARY_DIR`
+  (a Docker volume); presets ship in `examples/`.
 
 ## Repo map
 
@@ -54,9 +57,10 @@ src/chaff/          engine, spec contract, plugin registries
   generators/       semantic value generators (+ path rules)
   formats/          pure encoders (+ path rules)
   sinks/            delivery (+ path rules)
+  library.py        spec library: presets + saved schemas
 api/                FastAPI transport (main.py) + static UI (static/index.html)
 examples/           preset spec library
-docs/adr/           the five load-bearing decisions
+docs/adr/           the load-bearing decisions
 AGENTS.md           Build DNA — read first
 CLAUDE.md           Claude Code entry point
 ROADMAP.md          phases and backlog

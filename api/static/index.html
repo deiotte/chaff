@@ -43,6 +43,19 @@
   .msg.ok { color:var(--accent); }
   .hint { color:var(--muted); font-size:12px; margin-top:2px; }
   .empty { color:var(--muted); font-size:13px; }
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px; }
+  .spec-card { text-align:left; border:1px solid var(--line); border-radius:9px; padding:11px 12px;
+               background:#fff; cursor:pointer; font:inherit; color:inherit; transition:border-color .12s; }
+  .spec-card:hover { border-color:var(--accent); }
+  .spec-card .nm { font-weight:600; font-size:14px; display:flex; justify-content:space-between; gap:6px; align-items:center; }
+  .spec-card .badge { font-size:10px; text-transform:uppercase; letter-spacing:.5px; padding:2px 6px;
+                      border-radius:20px; background:#eef1f4; color:var(--muted); font-weight:600; }
+  .spec-card .badge.saved { background:#e7f1ec; color:var(--accent); }
+  .spec-card .meta { color:var(--muted); font-size:12px; margin-top:5px; }
+  .spec-card .desc { color:var(--ink); font-size:12px; margin-top:6px; opacity:.75;
+                     display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .save-row { display:flex; gap:8px; margin-top:12px; align-items:center; }
+  .save-row input { max-width:220px; }
 </style>
 </head>
 <body>
@@ -52,6 +65,16 @@
 </header>
 
 <main>
+  <section class="card">
+    <h2>Library <span style="font-weight:400;text-transform:none;letter-spacing:0">— pick a preset or a saved schema to start</span></h2>
+    <div id="gallery" class="gallery"><div class="empty">Loading…</div></div>
+    <div class="save-row">
+      <input id="saveName" placeholder="name to save current spec as">
+      <button class="btn ghost" id="saveBtn">Save to library</button>
+      <span class="msg" id="libMsg"></span>
+    </div>
+  </section>
+
   <section class="card">
     <h2>Dataset</h2>
     <div class="row3">
@@ -109,17 +132,32 @@ function generatorOptions(selected) {
   return GENERATORS.map(g => `<option${g === selected ? ' selected' : ''}>${g}</option>`).join('');
 }
 
-function addColumn(name = '', generator = '') {
+function addColumn(name = '', generator = '', params = null, nullRate = 0) {
   const div = document.createElement('div');
   div.className = 'col';
+  const paramsText = params && Object.keys(params).length ? JSON.stringify(params) : '';
   div.innerHTML =
-    `<input class="c-name" placeholder="column" value="${name}">
+    `<input class="c-name" placeholder="column">
      <select class="c-gen">${generatorOptions(generator)}</select>
      <textarea class="c-params" rows="1" placeholder='{"min":0,"max":100}'></textarea>
-     <input class="c-null" type="number" min="0" max="1" step="0.05" value="0">
+     <input class="c-null" type="number" min="0" max="1" step="0.05">
      <button class="x" title="remove">×</button>`;
+  div.querySelector('.c-name').value = name;
+  div.querySelector('.c-params').value = paramsText;
+  div.querySelector('.c-null').value = nullRate || 0;
   div.querySelector('.x').onclick = () => div.remove();
   $('cols').appendChild(div);
+}
+
+// Reverse of buildSpec: hydrate the form from a loaded/preset spec.
+function loadSpecIntoForm(spec) {
+  $('name').value = spec.name || 'dataset';
+  $('rows').value = spec.rows || 100;
+  $('seed').value = (spec.seed ?? '') === null ? '' : (spec.seed ?? '');
+  if (spec.output && spec.output.format) $('format').value = spec.output.format;
+  $('cols').innerHTML = '';
+  (spec.columns || []).forEach(c => addColumn(c.name, c.generator, c.params, c.null_rate));
+  setMsg(`Loaded "${spec.name}"`, 'ok');
 }
 
 // Assemble a DatasetSpec from the form. The UI only builds specs (INV-1).
@@ -199,10 +237,50 @@ async function doDownload() {
   setMsg(`Downloaded ${filename} (${blob.size} bytes)`, 'ok');
 }
 
+// ── Library gallery ──────────────────────────────────────────────
+async function refreshLibrary() {
+  const r = await fetch('/library');
+  const { specs } = await r.json();
+  const g = $('gallery');
+  if (!specs.length) { g.innerHTML = '<div class="empty">No presets or saved schemas found.</div>'; return; }
+  g.innerHTML = '';
+  specs.forEach(s => {
+    const card = document.createElement('button');
+    card.className = 'spec-card';
+    card.innerHTML =
+      `<div class="nm">${s.name}<span class="badge ${s.source}">${s.source}</span></div>
+       <div class="meta">${s.rows ?? '?'} rows · ${s.columns ?? '?'} cols · ${s.format ?? '?'}</div>` +
+      (s.description ? `<div class="desc">${s.description}</div>` : '');
+    card.onclick = () => loadNamed(s.name);
+    g.appendChild(card);
+  });
+}
+
+async function loadNamed(name) {
+  const r = await fetch('/library/' + encodeURIComponent(name));
+  if (!r.ok) return setMsg(await apiError(r), 'err');
+  loadSpecIntoForm(await r.json());
+  if (!$('saveName').value) $('saveName').value = name;
+}
+
+async function saveToLibrary() {
+  const name = $('saveName').value.trim();
+  if (!name) { $('libMsg').className = 'msg err'; $('libMsg').textContent = 'Enter a name.'; return; }
+  let spec;
+  try { spec = buildSpec(); } catch (e) { $('libMsg').className = 'msg err'; $('libMsg').textContent = e.message; return; }
+  const r = await fetch('/library/' + encodeURIComponent(name), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+  $('libMsg').className = 'msg ' + (r.ok ? 'ok' : 'err');
+  $('libMsg').textContent = r.ok ? `Saved "${name}"` : await apiError(r);
+  if (r.ok) refreshLibrary();
+}
+
 $('addCol').onclick = () => addColumn();
 $('previewBtn').onclick = doPreview;
 $('downloadBtn').onclick = doDownload;
+$('saveBtn').onclick = saveToLibrary;
 loadRegistry();
+refreshLibrary();
 </script>
 </body>
 </html>
