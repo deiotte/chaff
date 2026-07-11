@@ -76,7 +76,7 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       same row (`total = price * qty`) — `GenContext.row` + a safe (no-eval)
       formula evaluator, validated at load time (ADR-0012). The
       internal-correlation "realism unlock" for demos.
-- [ ] Multi-provider NL drafting: OpenAI + Google alongside Anthropic,
+- [x] Multi-provider NL drafting: OpenAI + Google alongside Anthropic,
       auto-detected by which API key env var is set.
 - [ ] Tier 2 generators: geo (`country`, `zip_code`, `timezone`), finance
       (`currency_code`, test `credit_card`, `iban`), people (`job_title`,

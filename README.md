@@ -11,27 +11,68 @@ you need it.
 > chaff produces demo/test data only. It is not a training-data pipeline
 > and will not become one.
 
-## Quick start
+## Get it running (2 minutes, no coding)
+
+You need [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+installed and running. That's it — no Python, no setup.
 
 ```bash
-# Library + CLI
-pip install -e .
+git clone https://github.com/deiotte/chaff.git
+cd chaff
+docker compose up --build          # first run downloads + builds; give it a minute
+```
+
+Then open **http://localhost:8000** in your browser. You'll see a form.
+
+1. Click any card in **Library** (e.g. *crm_contacts*) to load a ready-made dataset.
+2. Click **Preview** to see sample rows.
+3. Click **Download** to save the file.
+
+That's the whole loop: pick something, preview, download. Tweak the columns,
+change the row count, switch the format — no code, no engineer.
+
+When you're done, press `Ctrl+C` in the terminal to stop it.
+
+### Turn on "Describe it in English" (optional)
+
+The **Describe it** box at the top can draft a dataset from a plain sentence
+(e.g. *"500 CRM contacts with name, email, company, and a weighted lead
+status"*). It needs an AI API key. To switch it on:
+
+```bash
+cp .env.example .env               # make your own settings file
+# open .env and paste your key after ANTHROPIC_API_KEY=
+docker compose up --build          # restart to pick it up
+```
+
+The key stays on the server — the browser never sees it. Anthropic works out
+of the box; for OpenAI or Google, `.env.example` shows the one extra line.
+
+### Troubleshooting
+
+| What you see | What's wrong / what to do |
+|---|---|
+| `docker: command not found` | Docker Desktop isn't installed or isn't running. Install it, open it, try again. |
+| `port is already allocated` / page won't load | Something else is on port 8000. Stop it, or change `"8000:8000"` to `"8080:8000"` in `docker-compose.yml` and open http://localhost:8080. |
+| **Describe it** says *"needs an LLM API key"* | No key set. See "Turn on Describe it in English" above. |
+| **Describe it** says *"needs its SDK"* | You set an OpenAI/Google key but built the default (Anthropic) image. Set `CHAFF_EXTRAS` in `.env` (see the file) and `docker compose up --build`. |
+| Downloaded a preset but the numbers look the same every time | That's the point — same spec + seed = identical data, on purpose (see "Seeded" below). Change the **Seed** field for different data. |
+
+## For developers (CLI + library)
+
+Prefer the command line, or want to script it? chaff is also a plain Python
+library and CLI — no server needed.
+
+```bash
+pip install -e .                            # core library + CLI
 chaff registry                              # what can it generate?
 chaff generate examples/crm_contacts.json   # 500 CRM contacts -> out/*.csv
 chaff generate examples/case_records.json   # 1000 cases -> Postgres SQL
 chaff generate examples/crm_contacts.json --seed 7 --rows 50 -o small.csv
 
-# API + UI (dev) — open http://localhost:8000 for the form-based builder
-pip install -e '.[api]'
-make run-api
-
-# Excel (.xlsx) output needs the formats-extra extra
-pip install -e '.[formats-extra]'
-
-# Docker (the intended distribution — pull, build, run anywhere)
-docker compose up --build
-# Phase 2 sink dev, with a Kafka broker:
-docker compose --profile streaming up --build
+pip install -e '.[api]'                      # then `make run-api` for the UI
+pip install -e '.[formats-extra]'            # Excel (.xlsx), Parquet, Avro
+docker compose --profile streaming up --build  # + a Kafka broker for sink dev
 ```
 
 ## The idea

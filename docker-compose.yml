@@ -1,8 +1,19 @@
 services:
   chaff:
-    build: .
+    build:
+      context: .
+      # Swap the LLM SDK baked in without editing files: set CHAFF_EXTRAS in
+      # .env (e.g. api,nl-openai) then `docker compose up --build`.
+      args:
+        CHAFF_EXTRAS: ${CHAFF_EXTRAS:-api,nl}
     ports:
       - "8000:8000"
+    # API keys for the "Describe it in English" button. Put one in .env
+    # (see .env.example); empty here means "off" — the browser never sees it.
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
     volumes:
       - ./out:/app/out
       - ./spec-library:/app/spec-library   # saved schemas persist across restarts

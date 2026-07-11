@@ -13,3 +13,6 @@ out/
 
 # saved schemas (spec library) — user data, not source
 spec-library/
+
+# local secrets (API keys for the "Describe it in English" button)
+.env
