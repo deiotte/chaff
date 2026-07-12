@@ -7,13 +7,14 @@ hands them to the engine (INV-1). Run: uvicorn api.main:app --reload
 
 from __future__ import annotations
 
+import html
 import os
 import sys
 from pathlib import Path
 from typing import Iterator, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -246,15 +247,61 @@ def _bundled_dir() -> Path:
     return Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).parent.parent
 
 
-@app.get("/licenses", response_class=PlainTextResponse)
+def _licenses_page(title: str, intro_html: str, body_html: str) -> str:
+    """A tiny self-contained HTML shell for the attribution page. No external
+    assets (matches the build-free UI, ADR-0006) and a link back to the app, so
+    a non-technical user who clicks the footer link always lands on a readable
+    page — never a raw text blob or a bare JSON error that reads as 'empty'."""
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} — chaff</title>
+<style>
+  :root {{ color-scheme: light dark; }}
+  body {{ font: 14px/1.5 system-ui, sans-serif; margin: 0;
+          background: #0f1115; color: #e6e6e6; }}
+  header {{ padding: 16px 20px; border-bottom: 1px solid #2a2e37; }}
+  header a {{ color: #9aa7ff; text-decoration: none; }}
+  h1 {{ font-size: 18px; margin: 0 0 4px; }}
+  main {{ padding: 16px 20px; }}
+  p.intro {{ color: #9aa0aa; max-width: 70ch; }}
+  pre {{ white-space: pre-wrap; word-wrap: break-word; background: #161a22;
+         border: 1px solid #2a2e37; border-radius: 8px; padding: 16px;
+         overflow-x: auto; font-size: 12.5px; }}
+</style></head>
+<body>
+  <header><a href="/">← back to chaff</a></header>
+  <main>
+    <h1>{title}</h1>
+    <p class="intro">{intro_html}</p>
+    {body_html}
+  </main>
+</body></html>"""
+
+
+@app.get("/licenses", response_class=HTMLResponse)
 def licenses():
     """Third-party attribution for bundled dependencies (MIT/BSD/Apache-2.0
-    NOTICE). chaff's own license is MIT — see the LICENSE file."""
+    NOTICE). chaff's own license is MIT — see the LICENSE file. Rendered as a
+    readable page (not a raw text dump) so the footer link never looks broken."""
     path = _bundled_dir() / "THIRD-PARTY-NOTICES.txt"
     if not path.is_file():
-        raise HTTPException(status_code=404,
-                            detail="third-party notices are not bundled in this build")
-    return path.read_text(encoding="utf-8", errors="replace")
+        # Missing notices are a packaging gap, not a user error — say so plainly
+        # instead of returning a bare JSON 404 that shows up as an empty tab.
+        page = _licenses_page(
+            "Open-source licenses",
+            "Third-party notices aren't bundled in this build. chaff itself is "
+            "MIT licensed. If you're seeing this in the packaged app, grab a "
+            "current build — the notices are generated and bundled at release "
+            "time (<code>make notices</code> regenerates them from source).",
+            "")
+        return HTMLResponse(page, status_code=404)
+    notices = html.escape(path.read_text(encoding="utf-8", errors="replace"))
+    return _licenses_page(
+        "Open-source licenses",
+        "chaff is distributed under the MIT License. Bundled builds include the "
+        "open-source dependencies below, each with its license text.",
+        f"<pre>{notices}</pre>")
 
 
 # The web UI is a static, build-free page served by this same process
