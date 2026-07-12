@@ -36,6 +36,9 @@ def test_registry_lists_plugins():
     assert "full_name" in body["generators"]
     assert "xlsx" in body["formats"]
     assert "file" in body["sinks"]
+    # The UI reads generator_examples to seed each column's params placeholder.
+    assert body["generator_examples"]["choice"] == {
+        "values": ["Open", "Pending", "Closed"]}
 
 
 def test_preview_caps_rows():
