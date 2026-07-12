@@ -179,6 +179,20 @@ ROADMAP.md          phases and backlog
 ## Development
 
 ```bash
-make check      # the definition of green
-make examples   # regenerate all presets into out/
+make check          # the definition of green
+make examples       # regenerate all presets into out/
+make notices        # regenerate THIRD-PARTY-NOTICES.txt (bundled-deps attribution)
+make license-check  # fail if any bundled dependency is non-permissive
 ```
+
+## License
+
+chaff is **MIT licensed** — see [`LICENSE`](LICENSE). Use it, fork it, ship it.
+
+Bundled/redistributed builds (the Windows `chaff.exe`) include
+[`THIRD-PARTY-NOTICES.txt`](THIRD-PARTY-NOTICES.txt) with the license and NOTICE
+attributions for chaff's open-source dependencies (all permissive — MIT / BSD /
+Apache-2.0 / MPL-2.0). The running app also serves them at `/licenses`, and the
+release attaches the notices file next to the exe. All runtime dependencies are
+permissive; PyInstaller (build-only, GPL with a bootloader exception) does not
+affect the license of the produced binary.

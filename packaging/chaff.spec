@@ -18,6 +18,10 @@ datas = [
     (os.path.join(ROOT, "api", "static"), os.path.join("api", "static")),
     # Preset library. The launcher points CHAFF_PRESETS_DIR at _MEIPASS/examples.
     (os.path.join(ROOT, "examples"), "examples"),
+    # Third-party attribution (MIT/BSD/Apache-2.0 NOTICE), served at /licenses.
+    # CI regenerates this before freezing; committed copy covers local builds.
+    (os.path.join(ROOT, "THIRD-PARTY-NOTICES.txt"), "."),
+    (os.path.join(ROOT, "LICENSE"), "."),
 ]
 # faker ships locale/provider data loaded via dynamic import — the module graph
 # alone misses it, and it's on the core generate path.
