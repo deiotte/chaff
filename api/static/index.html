@@ -28,6 +28,21 @@
   .cols-head { margin-bottom:6px; }
   .cols-head span { font-size:12px; color:var(--muted); }
   .col { margin-bottom:10px; }
+  .fxpanel { grid-column:1 / -1; margin-top:6px; padding:9px 11px; background:#f5faf7;
+             border:1px solid var(--line); border-radius:7px; }
+  .fxpanel .fx { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .fxpanel .op { width:132px; padding:6px 8px; }
+  .fxpanel .opr { width:62px; padding:6px 4px; text-align:center; }
+  .fxpanel .fxbtn { background:#e7f1ec; color:var(--accent); border:0; border-radius:6px;
+                    padding:6px 10px; cursor:pointer; font:inherit; font-weight:600; }
+  .fxpanel .fxx { background:#f3e7e7; color:var(--bad); border:0; border-radius:6px;
+                  width:26px; height:32px; cursor:pointer; }
+  .fxpanel .fxfoot { display:flex; justify-content:space-between; align-items:center;
+                     gap:10px; margin-top:8px; }
+  .fxpanel .fxeq { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:var(--muted);
+                   overflow-x:auto; white-space:nowrap; }
+  .fxpanel .link { color:var(--accent); cursor:pointer; font-size:12px; background:none;
+                   border:0; padding:0; white-space:nowrap; }
   .btn { border:0; border-radius:7px; padding:9px 16px; font:inherit; font-weight:600;
          cursor:pointer; background:var(--accent); color:var(--accent-ink); }
   .btn.ghost { background:#eef1f4; color:var(--ink); font-weight:500; }
@@ -152,9 +167,10 @@ async function loadRegistry() {
   addColumn('id', 'row_id');
   addColumn('name', 'full_name');
   $('genHint').textContent =
-    'Tip: the "derived" generator computes a value from other columns in the ' +
-    'same row — type a formula like  price * qty  (use column names declared ' +
-    'above it). Works with + - * / , comparisons, and round()/min()/max().';
+    'Tip: pick the "derived" generator to compute a value from other columns ' +
+    '— a value/operator/value builder appears (＋ to chain more). Only columns ' +
+    'above it can be used; text values are quoted for you. Switch to "edit as ' +
+    'text" for round()/min()/max() or  ‘A’ if x > 0 else ‘B’.';
 }
 
 function generatorOptions(selected) {
@@ -178,6 +194,122 @@ function syncParamsField(sel, params) {
   params.placeholder = derived ? 'formula, e.g. price * qty' : '{"min":0,"max":100}';
 }
 
+// ── Guided formula builder for `derived` columns ──────────────────────
+// Each operand is a text input with autocomplete over the columns declared
+// above it. At assemble time we classify each value: a known column name ->
+// used as-is; a number -> as-is; anything else -> auto-quoted as a string
+// (so nobody has to learn when to add quotes). Output is a formula string
+// written into the column's .c-params — the same field buildSpec reads.
+let _fxSeq = 0;
+const FX_OPS = [['+', '+'], ['-', '−'], ['*', '×'], ['/', '÷'],
+                ['>', '>'], ['<', '<'], ['>=', '≥'], ['<=', '≤'], ['==', '='], ['!=', '≠']];
+
+function columnsBefore(colDiv) {
+  const cols = [...document.querySelectorAll('.col')];
+  return cols.slice(0, cols.indexOf(colDiv))
+    .map(c => c.querySelector('.c-name').value.trim()).filter(Boolean);
+}
+
+function classifyOperand(v, cols) {
+  v = v.trim();
+  if (!v) return '';
+  if (cols.includes(v)) return v;                       // a column reference
+  if (/^-?\d+(\.\d+)?$/.test(v)) return v;              // a numeric literal
+  return "'" + v.replace(/'/g, "\\'") + "'";            // text -> auto-quoted
+}
+
+function refreshFxList(colDiv, listId) {
+  const dl = document.getElementById(listId);
+  if (dl) dl.innerHTML = columnsBefore(colDiv).map(n => `<option value="${n}"></option>`).join('');
+}
+
+function assembleFx(colDiv, par) {
+  const panel = colDiv.querySelector('.fxpanel');
+  const cols = columnsBefore(colDiv);
+  const parts = [];
+  panel.querySelector('.fx').querySelectorAll('.op, .opr').forEach(el =>
+    parts.push(el.classList.contains('op') ? classifyOperand(el.value, cols) : el.value));
+  const formula = parts.filter(Boolean).join(' ');
+  par.value = formula;
+  panel.querySelector('.fxeq').textContent = formula ? '= ' + formula : '(build a formula →)';
+}
+
+function makeOperand(colDiv, par, listId) {
+  const inp = document.createElement('input');
+  inp.className = 'op'; inp.setAttribute('list', listId);
+  inp.placeholder = 'column or value';
+  inp.onfocus = () => refreshFxList(colDiv, listId);
+  inp.oninput = () => assembleFx(colDiv, par);
+  return inp;
+}
+
+function makeOperator(colDiv, par) {
+  const sel = document.createElement('select');
+  sel.className = 'opr';
+  sel.innerHTML = FX_OPS.map(([v, label]) => `<option value="${v}">${label}</option>`).join('');
+  sel.onchange = () => assembleFx(colDiv, par);
+  return sel;
+}
+
+function buildFxPanel(colDiv, par) {
+  const listId = 'fxcols-' + (_fxSeq++);
+  const panel = document.createElement('div');
+  panel.className = 'fxpanel';
+  panel.innerHTML =
+    `<datalist id="${listId}"></datalist>
+     <div class="fx"></div>
+     <div class="fxfoot">
+       <div class="fxeq">(build a formula →)</div>
+       <button type="button" class="link" data-role="toggle">✎ edit as text</button>
+     </div>`;
+  const fx = panel.querySelector('.fx');
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button'; addBtn.className = 'fxbtn'; addBtn.textContent = '＋';
+  addBtn.title = 'add operator + value';
+  addBtn.onclick = () => {
+    fx.insertBefore(makeOperator(colDiv, par), addBtn);
+    fx.insertBefore(makeOperand(colDiv, par, listId), addBtn);
+    assembleFx(colDiv, par);
+  };
+  fx.appendChild(makeOperand(colDiv, par, listId));
+  fx.appendChild(addBtn);
+  panel.querySelector('[data-role="toggle"]').onclick = () =>
+    setDerivedUI(colDiv, panel.dataset.mode === 'builder' ? 'raw' : 'builder');
+  return panel;
+}
+
+function setDerivedUI(colDiv, mode) {
+  const par = colDiv.querySelector('.c-params');
+  let panel = colDiv.querySelector('.fxpanel');
+  if (!panel) { panel = buildFxPanel(colDiv, par); colDiv.appendChild(panel); }
+  panel.style.display = '';
+  panel.dataset.mode = mode;
+  const builder = mode === 'builder';
+  panel.querySelector('.fx').style.display = builder ? 'flex' : 'none';
+  panel.querySelector('.fxeq').style.display = builder ? '' : 'none';
+  panel.querySelector('[data-role="toggle"]').textContent =
+    builder ? '✎ edit as text' : '⊞ use builder';
+  // Keep the params cell in the grid (readonly in builder mode so it just
+  // mirrors the assembled formula). Don't re-assemble on entry — that would
+  // clobber a formula typed in raw mode.
+  par.readOnly = builder;
+  par.placeholder = builder ? 'built below ↓'
+    : "e.g.  round(price * qty, 2)   or   'VIP' if total > 500 else 'std'";
+}
+
+// Decide the params UI for a column based on its generator.
+function updateColMode(colDiv, sel, par) {
+  if (sel.value === 'derived') {
+    // New (empty) derived column -> guided builder; a loaded one -> raw text.
+    setDerivedUI(colDiv, par.value.trim() ? 'raw' : 'builder');
+  } else {
+    const panel = colDiv.querySelector('.fxpanel');
+    if (panel) panel.style.display = 'none';
+    par.readOnly = false;
+    syncParamsField(sel, par);
+  }
+}
+
 function addColumn(name = '', generator = '', params = null, nullRate = 0) {
   const div = document.createElement('div');
   div.className = 'col';
@@ -191,11 +323,11 @@ function addColumn(name = '', generator = '', params = null, nullRate = 0) {
   const sel = div.querySelector('.c-gen');
   const par = div.querySelector('.c-params');
   par.value = paramsToText(sel.value, params);
-  syncParamsField(sel, par);
-  sel.onchange = () => syncParamsField(sel, par);
   div.querySelector('.c-null').value = nullRate || 0;
   div.querySelector('.x').onclick = () => div.remove();
+  sel.onchange = () => updateColMode(div, sel, par);
   $('cols').appendChild(div);
+  updateColMode(div, sel, par);  // in DOM now, so columnsBefore() works
 }
 
 // Reverse of buildSpec: hydrate the form from a loaded/preset spec.
