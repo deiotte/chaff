@@ -95,8 +95,13 @@ def _system_prompt() -> str:
         "params {\"expr\": \"...\"} where the formula uses other column names — e.g. "
         "{\"name\": \"total\", \"generator\": \"derived\", \"params\": {\"expr\": "
         "\"price * qty\", \"precision\": 2}} — and declare it AFTER the columns it "
-        "references. Give every generator sensible params. Pick a reasonable row count "
-        "and a format that suits the data. Return only the JSON object."
+        "references. When country/city/timezone/currency should agree per record, "
+        "make the country an anchor with {\"generator\": \"country\", \"params\": "
+        "{\"link\": true}} and give the dependent columns {\"from\": \"country\"} — "
+        "e.g. {\"name\": \"timezone\", \"generator\": \"timezone\", \"params\": "
+        "{\"from\": \"country\"}} and likewise for city/currency_code/lat/lon; declare "
+        "them AFTER the country column. Give every generator sensible params. Pick a "
+        "reasonable row count and a format that suits the data. Return only the JSON object."
     )
 
 

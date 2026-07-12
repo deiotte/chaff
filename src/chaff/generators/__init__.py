@@ -97,6 +97,8 @@ class GenContext:
     row_index: int    # 0-based row number (drives incrementing ids)
     tables: Any = None  # {table: [rows]} of already-generated parents (fk), else None
     row: Any = None   # the in-progress row dict (cells generated so far), for `derived`
+    cache: Any = None   # per-row scratch shared across a row's generators (geo linking)
+    column: Any = None  # name of the column currently being generated (cache key)
 
 
 # ── Identity / people ────────────────────────────────────────────────
@@ -133,9 +135,24 @@ def company(ctx: GenContext, p: dict) -> str:
 
 # ── Location ─────────────────────────────────────────────────────────
 
+def _linked_tuple(ctx: GenContext, p: dict):
+    """Coherent location tuple `(lat, lon, place, alpha2, tz)` cached by a
+    linked `country` anchor (ADR-0015), or None to fall back to an independent
+    draw. None when: no `from`; the anchor cell was nulled or couldn't be
+    placed; or `from` names a column that wasn't a linked anchor. Reading the
+    cache adds zero entropy (like `derived`), so it never perturbs determinism."""
+    src = p.get("from")
+    if not src or ctx.cache is None:
+        return None
+    return ctx.cache.get(src)
+
+
 @generator("city")
 def city(ctx: GenContext, p: dict) -> str:
-    return ctx.faker.city()
+    """A city. With {"from": "<linked country column>"} returns a city inside
+    that country (ADR-0015); otherwise an independent faker draw."""
+    tup = _linked_tuple(ctx, p)
+    return tup[2] if tup is not None else ctx.faker.city()
 
 
 @generator("state")
@@ -150,12 +167,22 @@ def street_address(ctx: GenContext, p: dict) -> str:
 
 @generator("lat")
 def lat(ctx: GenContext, p: dict) -> float:
+    """Latitude. With {"from": "<linked country column>"} the coordinate falls
+    inside that country and matches the linked city (ADR-0015)."""
+    tup = _linked_tuple(ctx, p)
+    if tup is not None:
+        return round(float(tup[0]), int(p.get("precision", 6)))
     lo, hi = p.get("min", -90.0), p.get("max", 90.0)
     return round(ctx.rng.uniform(lo, hi), int(p.get("precision", 6)))
 
 
 @generator("lon")
 def lon(ctx: GenContext, p: dict) -> float:
+    """Longitude. With {"from": "<linked country column>"} the coordinate falls
+    inside that country and matches the linked city (ADR-0015)."""
+    tup = _linked_tuple(ctx, p)
+    if tup is not None:
+        return round(float(tup[1]), int(p.get("precision", 6)))
     lo, hi = p.get("min", -180.0), p.get("max", 180.0)
     return round(ctx.rng.uniform(lo, hi), int(p.get("precision", 6)))
 
@@ -479,8 +506,41 @@ def derived(ctx: GenContext, p: dict) -> Any:
 
 @generator("country")
 def country(ctx: GenContext, p: dict) -> str:
-    """Country name, or ISO alpha-2 code with {"as_code": true}."""
-    return ctx.faker.country_code() if p.get("as_code") else ctx.faker.country()
+    """Country name, or ISO alpha-2 code with {"as_code": true}.
+
+    Correlation (opt-in, ADR-0015): {"link": true} resolves ONE coherent
+    location for the row — a real city, its IANA timezone, matching lat/lon,
+    and (via the curated table) its currency — and caches it so dependent
+    columns using {"from": "<this column>"} fan out consistently. Constrain
+    the countries with {"values": ["US","RU","DE"]} (+ optional "weights");
+    those must be alpha-2 codes faker can place (else an independent fallback).
+    Without "link", behaviour is unchanged (an independent faker draw)."""
+    if not p.get("link"):
+        return ctx.faker.country_code() if p.get("as_code") else ctx.faker.country()
+
+    from ..data import name_for
+    values = p.get("values")
+    if values:
+        weights = p.get("weights")
+        cc = (ctx.rng.choices(values, weights=weights, k=1)[0]
+              if weights else ctx.rng.choice(values))
+        tup = ctx.faker.local_latlng(country_code=str(cc).upper())  # coherent within cc
+    else:
+        cc = None
+        tup = ctx.faker.location_on_land()                          # coherent, global
+    # tup = (lat, lon, place, alpha2, IANA_tz), or None for an unplaceable code.
+
+    if tup is None:
+        # Country faker can't place -> degrade to a plain draw, cache nothing,
+        # so dependents fall back independently.
+        return str(cc).upper() if (cc and p.get("as_code")) else ctx.faker.country()
+
+    if ctx.cache is not None and ctx.column is not None:
+        ctx.cache[ctx.column] = tup
+    alpha2 = tup[3]
+    if p.get("as_code"):
+        return alpha2
+    return name_for(alpha2) or ctx.faker.country()
 
 
 @generator("zip_code")
@@ -491,13 +551,21 @@ def zip_code(ctx: GenContext, p: dict) -> str:
 
 @generator("timezone")
 def timezone(ctx: GenContext, p: dict) -> str:
-    """IANA timezone name, e.g. 'America/New_York'."""
-    return ctx.faker.timezone()
+    """IANA timezone name, e.g. 'America/New_York'. With
+    {"from": "<linked country column>"} returns that country's timezone (ADR-0015)."""
+    tup = _linked_tuple(ctx, p)
+    return tup[4] if tup is not None else ctx.faker.timezone()
 
 
 @generator("currency_code")
-def currency_code(ctx: GenContext, p: dict) -> str:
-    """ISO 4217 currency code, e.g. 'USD'."""
+def currency_code(ctx: GenContext, p: dict) -> str | None:
+    """ISO 4217 currency code, e.g. 'USD'. With {"from": "<linked country
+    column>"} returns that country's currency via the curated table (ADR-0015);
+    None if the country isn't in the table."""
+    tup = _linked_tuple(ctx, p)
+    if tup is not None:
+        from ..data import currency_for
+        return currency_for(tup[3])
     return ctx.faker.currency_code()
 
 

@@ -82,6 +82,10 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
       (`currency_code`, test `credit_card`, `iban`), people (`job_title`,
       `age`, `gender`). Deterministic via `ctx.faker`/`ctx.rng`. Example:
       `examples/employees.json`.
+- [x] Correlated columns: a linked `country` anchor drives matching
+      `city`/`timezone`/`currency_code`/`lat`/`lon` (`{"link": true}` +
+      `{"from": "country"}`) — ADR-0015. Opt-in, deterministic, curated
+      country→currency table. Example: `examples/crm_contacts_geo.json`.
 
 ## Phase 5 — Distribution
 - [x] Windows one-click `.exe` (PyInstaller onefile, built in CI on

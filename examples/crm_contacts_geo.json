@@ -1,0 +1,28 @@
+{
+  "name": "crm_contacts_geo",
+  "description": "PRESET: CRM contacts where location fields agree — a linked country drives a matching city, timezone, currency, and coordinates. Shows correlated (anchored) columns.",
+  "seed": 100,
+  "rows": 500,
+  "columns": [
+    {"name": "contact_id", "generator": "row_id", "params": {"start": 1000}},
+    {"name": "full_name", "generator": "full_name"},
+    {"name": "email", "generator": "email"},
+    {"name": "phone", "generator": "phone", "null_rate": 0.15},
+    {"name": "company", "generator": "company"},
+    {"name": "country", "generator": "country",
+     "params": {"link": true, "values": ["US", "GB", "DE", "FR", "JP", "BR", "IN", "AU", "CA", "MX"],
+                "weights": [0.30, 0.12, 0.10, 0.08, 0.08, 0.07, 0.07, 0.06, 0.07, 0.05]}},
+    {"name": "city", "generator": "city", "params": {"from": "country"}},
+    {"name": "timezone", "generator": "timezone", "params": {"from": "country"}},
+    {"name": "currency", "generator": "currency_code", "params": {"from": "country"}},
+    {"name": "lat", "generator": "lat", "params": {"from": "country", "precision": 4}},
+    {"name": "lon", "generator": "lon", "params": {"from": "country", "precision": 4}},
+    {"name": "lead_status", "generator": "choice_weighted",
+     "params": {"values": ["New", "Contacted", "Qualified", "Won", "Lost"],
+                "weights": [0.35, 0.30, 0.20, 0.08, 0.07]}},
+    {"name": "created", "generator": "date_between",
+     "params": {"start": "2024-06-01", "end": "2026-06-01"}}
+  ],
+  "output": {"format": "csv"},
+  "sink": {"sink": "file", "options": {"path": "out/crm_contacts_geo.csv"}}
+}

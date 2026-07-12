@@ -182,6 +182,40 @@ class DatasetSpec(BaseModel):
             check(t.columns, f"table '{t.name}'")
         return self
 
+    @model_validator(mode="after")
+    def _validate_geo_links(self) -> "DatasetSpec":
+        """Fail early if a column's {'from': X} doesn't point at a linked
+        `country` column declared before it (ADR-0015) — a precise error
+        instead of a silent independent fallback at generation time."""
+        linkable = {"city", "timezone", "lat", "lon", "currency_code"}
+
+        def check(cols: list[ColumnSpec], where: str) -> None:
+            declared: set[str] = set()
+            anchors: set[str] = set()  # names of linked `country` columns seen so far
+            for c in cols:
+                src = c.params.get("from")
+                if src is not None:
+                    if c.generator not in linkable:
+                        raise ValueError(
+                            f"{where} column '{c.name}': 'from' is only valid on "
+                            f"{sorted(linkable)}, not '{c.generator}'")
+                    if src not in declared:
+                        raise ValueError(
+                            f"{where} column '{c.name}': 'from' references '{src}', "
+                            "which must be a column declared before it")
+                    if src not in anchors:
+                        raise ValueError(
+                            f"{where} column '{c.name}': 'from' references '{src}', which "
+                            "must be a `country` column with {\"link\": true}")
+                declared.add(c.name)
+                if c.generator == "country" and c.params.get("link"):
+                    anchors.add(c.name)
+
+        check(self.columns, "dataset")
+        for t in self.tables or []:
+            check(t.columns, f"table '{t.name}'")
+        return self
+
 
 def load_spec(data: dict[str, Any] | str) -> DatasetSpec:
     """Parse and validate a spec from a dict or JSON string."""
