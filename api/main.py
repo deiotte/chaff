@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -230,6 +230,25 @@ def draft(req: DraftRequest):
         return nl.draft_spec(description, provider=provider, api_key=key)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"could not draft a valid spec: {e}")
+
+
+# ── Open-source attribution ──────────────────────────────────────────
+
+def _bundled_dir() -> Path:
+    """Root holding bundled data files: _MEIPASS when frozen (ADR-0014), else
+    the repo root (parent of api/)."""
+    return Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).parent.parent
+
+
+@app.get("/licenses", response_class=PlainTextResponse)
+def licenses():
+    """Third-party attribution for bundled dependencies (MIT/BSD/Apache-2.0
+    NOTICE). chaff's own license is MIT — see the LICENSE file."""
+    path = _bundled_dir() / "THIRD-PARTY-NOTICES.txt"
+    if not path.is_file():
+        raise HTTPException(status_code=404,
+                            detail="third-party notices are not bundled in this build")
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 # The web UI is a static, build-free page served by this same process

@@ -6,7 +6,17 @@ build-backend = "setuptools.build_meta"
 name = "chaff"
 version = "0.1.0"
 description = "Spec-driven synthetic demo data engine. Fake signals convincing enough to work with."
+readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Karl Deiotte" }]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Testing",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "pydantic>=2.5",
     "faker>=20.0",

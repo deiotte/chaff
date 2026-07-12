@@ -31,21 +31,29 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[api,formats-extra,nl,nl-openai]"
-          pip install pyinstaller
+          pip install pyinstaller pip-licenses
+
+      - name: Regenerate third-party notices (must match the frozen env)
+        run: |
+          python packaging/gen_notices.py
+          python packaging/gen_notices.py --check
 
       - name: Build onefile exe
         run: pyinstaller packaging/chaff.spec
 
-      - name: Verify the exe was produced
+      - name: Verify the exe and stage notices
         run: |
           if (-not (Test-Path "dist/chaff.exe")) { throw "chaff.exe not produced" }
+          Copy-Item THIRD-PARTY-NOTICES.txt dist/
           Get-Item dist/chaff.exe | Format-List Name, Length
 
-      - name: Upload artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: chaff-windows-exe
-          path: dist/chaff.exe
+          path: |
+            dist/chaff.exe
+            dist/THIRD-PARTY-NOTICES.txt
           if-no-files-found: error
 
   release:
@@ -63,6 +71,8 @@ jobs:
       - name: Create/update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/chaff.exe
+          files: |
+            dist/chaff.exe
+            dist/THIRD-PARTY-NOTICES.txt
           fail_on_unmatched_files: true
           generate_release_notes: true
