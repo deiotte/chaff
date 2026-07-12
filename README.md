@@ -148,6 +148,11 @@ docker compose --profile streaming up --build  # + a Kafka broker for sink dev
   parsed, not run), and it adds zero entropy so seeded output stays
   byte-identical. The realism unlock: the numbers actually add up. See
   `examples/orders_with_totals.json`.
+- **Correlated columns** (ADR-0015): mark a `country` column `{"link": true}`
+  and give `city`/`timezone`/`currency_code`/`lat`/`lon` a `{"from": "country"}`
+  — they fan out consistently (Russia → a Russian city, Europe/Moscow, RUB,
+  matching coordinates) instead of clashing. Deterministic; opt-in (unmarked
+  columns stay independent). See `examples/crm_contacts_geo.json`.
 - **Stateful entities** (ADR-0009): an `entity` block turns rows into
   `count × ticks` time-ordered snapshots whose state evolves each tick —
   `movement` (moving lat/lon tracks), `lifecycle` (state transitions),

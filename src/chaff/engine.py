@@ -41,9 +41,13 @@ def _generate_table(rng, faker, columns, n_rows, tables=None) -> list[dict[str, 
     for i in range(n_rows):
         # `row` is filled in column order; ctx.row is the same dict, so a
         # `derived` column reads the cells generated before it (ADR-0012).
+        # `cache` is per-row scratch for coherent geo linking (ADR-0015).
         row: dict[str, Any] = {}
-        ctx = GenContext(rng=rng, faker=faker, row_index=i, tables=tables, row=row)
+        cache: dict[str, Any] = {}
+        ctx = GenContext(rng=rng, faker=faker, row_index=i, tables=tables,
+                         row=row, cache=cache)
         for col, fn in resolved:
+            ctx.column = col.name
             if col.null_rate > 0 and rng.random() < col.null_rate:
                 row[col.name] = None
             else:
@@ -141,15 +145,18 @@ def generate_entity_rows(spec: DatasetSpec) -> list[dict[str, Any]]:
     states: list[dict[str, Any]] = []
     for e in range(ent.count):
         state: dict[str, Any] = {}
+        cache: dict[str, Any] = {}
         # ctx.row is the entity's initial-state dict, so a `derived` column can
-        # compute from earlier initial-state columns (ADR-0012). Derived values
-        # are computed once at tick 0; updaters drive per-tick change.
-        gctx = GenContext(rng=rng, faker=faker, row_index=e, row=state)
+        # compute from earlier initial-state columns (ADR-0012); ctx.cache backs
+        # coherent geo linking (ADR-0015). Both are resolved once at tick 0;
+        # updaters drive per-tick change.
+        gctx = GenContext(rng=rng, faker=faker, row_index=e, row=state, cache=cache)
         if ent.id_pattern:
             ids.append(get_generator("pattern")(gctx, {"pattern": ent.id_pattern}))
         else:
             ids.append(e + 1)
         for col, fn in state_cols:
+            gctx.column = col.name
             if col.null_rate > 0 and rng.random() < col.null_rate:
                 state[col.name] = None
             else:
