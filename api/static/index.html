@@ -158,12 +158,16 @@
 const $ = (id) => document.getElementById(id);
 let GENERATORS = [];
 let GEN_GROUPS = [];
+// gen_id -> params example {…}, straight from the registry (INV-4). Drives the
+// params-field placeholder so each generator shows the exact shape it expects.
+let GEN_EXAMPLES = {};
 
 // Populate dropdowns from the live registry — never hardcode (INV-4).
 async function loadRegistry() {
   const r = await fetch('/registry');
   const reg = await r.json();
   GENERATORS = reg.generators;
+  GEN_EXAMPLES = reg.generator_examples || {};
   // Grouped for the dropdown; fall back to one flat group for older servers.
   GEN_GROUPS = reg.generator_groups || [{ group: '', generators: reg.generators }];
   const fmt = $('format');
@@ -193,9 +197,17 @@ function paramsToText(generator, params) {
   return JSON.stringify(params);
 }
 
+// The params-field placeholder is the selected generator's own example, so
+// picking "choice" shows {"values":["Open","Pending","Closed"]} — not a numeric
+// guess. Generators with no params (full_name, email…) say so instead of
+// suggesting a wrong shape. Examples come from the registry, never hardcoded.
 function syncParamsField(sel, params) {
-  const derived = sel.value === 'derived';
-  params.placeholder = derived ? 'formula, e.g. price * qty' : '{"min":0,"max":100}';
+  if (sel.value === 'derived') {
+    params.placeholder = 'formula, e.g. price * qty';
+    return;
+  }
+  const ex = GEN_EXAMPLES[sel.value];
+  params.placeholder = ex ? JSON.stringify(ex) : 'no params needed — leave blank';
 }
 
 // ── Guided formula builder for `derived` columns ──────────────────────

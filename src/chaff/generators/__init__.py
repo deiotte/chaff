@@ -22,13 +22,22 @@ from ._expr import FormulaError, referenced_names, safe_eval
 GeneratorFn = Callable[["GenContext", dict[str, Any]], Any]
 
 _REGISTRY: dict[str, GeneratorFn] = {}
+# gen_id -> a concrete, copy-pasteable params example. Interfaces (the UI's
+# params placeholder, docs) read this so office Joe sees the exact shape each
+# generator expects instead of guessing. INV-4 still holds: this lives beside
+# the registry, so a generator carries its own example — no UI hardcoding.
+_EXAMPLES: dict[str, dict[str, Any]] = {}
 
 
-def generator(gen_id: str) -> Callable[[GeneratorFn], GeneratorFn]:
+def generator(
+    gen_id: str, *, example: dict[str, Any] | None = None
+) -> Callable[[GeneratorFn], GeneratorFn]:
     def deco(fn: GeneratorFn) -> GeneratorFn:
         if gen_id in _REGISTRY:
             raise ValueError(f"generator '{gen_id}' already registered")
         _REGISTRY[gen_id] = fn
+        if example is not None:
+            _EXAMPLES[gen_id] = example
         return fn
     return deco
 
@@ -44,6 +53,13 @@ def get_generator(gen_id: str) -> GeneratorFn:
 
 def list_generators() -> list[str]:
     return sorted(_REGISTRY)
+
+
+def list_generator_examples() -> dict[str, dict[str, Any]]:
+    """gen_id -> concrete params example, for every generator that registered
+    one. Interfaces render these so a user sees the exact params shape (e.g.
+    `choice` -> {"values": [...]}) instead of a one-size-fits-all guess."""
+    return dict(_EXAMPLES)
 
 
 # Display grouping for UIs. INV-4 still holds: the registry is the source of
@@ -165,7 +181,7 @@ def street_address(ctx: GenContext, p: dict) -> str:
     return ctx.faker.street_address()
 
 
-@generator("lat")
+@generator("lat", example={"min": -90, "max": 90, "precision": 6})
 def lat(ctx: GenContext, p: dict) -> float:
     """Latitude. With {"from": "<linked country column>"} the coordinate falls
     inside that country and matches the linked city (ADR-0015)."""
@@ -176,7 +192,7 @@ def lat(ctx: GenContext, p: dict) -> float:
     return round(ctx.rng.uniform(lo, hi), int(p.get("precision", 6)))
 
 
-@generator("lon")
+@generator("lon", example={"min": -180, "max": 180, "precision": 6})
 def lon(ctx: GenContext, p: dict) -> float:
     """Longitude. With {"from": "<linked country column>"} the coordinate falls
     inside that country and matches the linked city (ADR-0015)."""
@@ -194,13 +210,13 @@ def uuid_(ctx: GenContext, p: dict) -> str:
     return ctx.faker.uuid4()
 
 
-@generator("row_id")
+@generator("row_id", example={"start": 1, "step": 1})
 def row_id(ctx: GenContext, p: dict) -> int:
     """Incrementing integer id. params: start (default 1), step (default 1)."""
     return int(p.get("start", 1)) + ctx.row_index * int(p.get("step", 1))
 
 
-@generator("pattern")
+@generator("pattern", example={"pattern": "XX-####-?????"})
 def pattern(ctx: GenContext, p: dict) -> str:
     """Pattern-based id. In `params.pattern`: '#'=digit, '?'=A-Z, else literal.
 
@@ -220,7 +236,7 @@ def pattern(ctx: GenContext, p: dict) -> str:
 
 # ── Relationships (multi-table FK, ADR-0008) ─────────────────────────
 
-@generator("fk")
+@generator("fk", example={"table": "users", "column": "id"})
 def fk(ctx: GenContext, p: dict) -> Any:
     """Foreign key: a value drawn from a parent table's column.
 
@@ -242,18 +258,18 @@ def fk(ctx: GenContext, p: dict) -> Any:
 
 # ── Numbers ──────────────────────────────────────────────────────────
 
-@generator("int_range")
+@generator("int_range", example={"min": 0, "max": 100})
 def int_range(ctx: GenContext, p: dict) -> int:
     return ctx.rng.randint(int(p.get("min", 0)), int(p.get("max", 100)))
 
 
-@generator("float_uniform")
+@generator("float_uniform", example={"min": 0, "max": 1, "precision": 2})
 def float_uniform(ctx: GenContext, p: dict) -> float:
     return round(ctx.rng.uniform(float(p.get("min", 0.0)), float(p.get("max", 1.0))),
                  int(p.get("precision", 2)))
 
 
-@generator("float_normal")
+@generator("float_normal", example={"mean": 0, "stddev": 1})
 def float_normal(ctx: GenContext, p: dict) -> float:
     """Gaussian — this is what makes demo charts look like real data."""
     v = ctx.rng.gauss(float(p.get("mean", 0.0)), float(p.get("stddev", 1.0)))
@@ -264,25 +280,30 @@ def float_normal(ctx: GenContext, p: dict) -> float:
     return round(v, int(p.get("precision", 2)))
 
 
-@generator("money")
+@generator("money", example={"min": 1, "max": 1000})
 def money(ctx: GenContext, p: dict) -> float:
     return round(ctx.rng.uniform(float(p.get("min", 1.0)), float(p.get("max", 1000.0))), 2)
 
 
 # ── Categorical ──────────────────────────────────────────────────────
 
-@generator("choice")
+@generator("choice", example={"values": ["Open", "Pending", "Closed"]})
 def choice(ctx: GenContext, p: dict) -> Any:
+    """Uniform pick from `values` (required, non-empty). params example:
+    {"values": ["Open", "Pending", "Closed"]}."""
     return ctx.rng.choice(p["values"])
 
 
-@generator("choice_weighted")
+@generator(
+    "choice_weighted",
+    example={"values": ["Open", "Pending", "Closed"], "weights": [0.7, 0.2, 0.1]},
+)
 def choice_weighted(ctx: GenContext, p: dict) -> Any:
     """params: values ['Open','Pending','Closed'], weights [0.7,0.2,0.1]."""
     return ctx.rng.choices(p["values"], weights=p["weights"], k=1)[0]
 
 
-@generator("bool_rate")
+@generator("bool_rate", example={"true_rate": 0.5})
 def bool_rate(ctx: GenContext, p: dict) -> bool:
     return ctx.rng.random() < float(p.get("true_rate", 0.5))
 
@@ -293,7 +314,7 @@ def _parse_dt(s: str) -> datetime:
     return datetime.fromisoformat(s)
 
 
-@generator("date_between")
+@generator("date_between", example={"start": "2024-01-01", "end": "2026-01-01"})
 def date_between(ctx: GenContext, p: dict) -> str:
     start = _parse_dt(p.get("start", "2024-01-01"))
     end = _parse_dt(p.get("end", "2026-01-01"))
@@ -301,7 +322,10 @@ def date_between(ctx: GenContext, p: dict) -> str:
     return (start + timedelta(days=ctx.rng.randint(0, max(delta, 0)))).date().isoformat()
 
 
-@generator("timestamp_between")
+@generator(
+    "timestamp_between",
+    example={"start": "2024-01-01T00:00:00", "end": "2026-01-01T00:00:00"},
+)
 def timestamp_between(ctx: GenContext, p: dict) -> str:
     start = _parse_dt(p.get("start", "2024-01-01T00:00:00"))
     end = _parse_dt(p.get("end", "2026-01-01T00:00:00"))
@@ -311,12 +335,12 @@ def timestamp_between(ctx: GenContext, p: dict) -> str:
 
 # ── Text ─────────────────────────────────────────────────────────────
 
-@generator("lorem_sentence")
+@generator("lorem_sentence", example={"words": 8})
 def lorem_sentence(ctx: GenContext, p: dict) -> str:
     return ctx.faker.sentence(nb_words=int(p.get("words", 8)))
 
 
-@generator("lorem_paragraph")
+@generator("lorem_paragraph", example={"sentences": 3})
 def lorem_paragraph(ctx: GenContext, p: dict) -> str:
     return ctx.faker.paragraph(nb_sentences=int(p.get("sentences", 3)))
 
@@ -326,7 +350,7 @@ def lorem_paragraph(ctx: GenContext, p: dict) -> str:
 # dashboards, and ML/anomaly scenarios behave like the real thing. All
 # entropy flows through ctx.rng, so they stay seed-deterministic (INV-3).
 
-@generator("lognormal")
+@generator("lognormal", example={"mu": 0, "sigma": 1})
 def lognormal(ctx: GenContext, p: dict) -> float:
     """Log-normal (skewed positive): incomes, latencies, file sizes.
 
@@ -337,7 +361,7 @@ def lognormal(ctx: GenContext, p: dict) -> float:
     return _clamp_round(v, p)
 
 
-@generator("exponential")
+@generator("exponential", example={"rate": 1.0})
 def exponential(ctx: GenContext, p: dict) -> float:
     """Exponential: inter-arrival / wait times. params: rate (lambda,
     default 1.0), precision (4), optional min/max."""
@@ -345,7 +369,7 @@ def exponential(ctx: GenContext, p: dict) -> float:
     return _clamp_round(v, p, default_precision=4)
 
 
-@generator("poisson")
+@generator("poisson", example={"mean": 1.0})
 def poisson(ctx: GenContext, p: dict) -> int:
     """Poisson counts per interval: orders/hour, errors/day.
 
@@ -362,7 +386,7 @@ def poisson(ctx: GenContext, p: dict) -> int:
             return k - 1
 
 
-@generator("power_law")
+@generator("power_law", example={"alpha": 2.0, "scale": 1.0})
 def power_law(ctx: GenContext, p: dict) -> float:
     """Power-law / Pareto tail: popularity, "80/20", city sizes.
 
@@ -426,13 +450,13 @@ def slug(ctx: GenContext, p: dict) -> str:
     return ctx.faker.slug()
 
 
-@generator("sha256")
+@generator("sha256", example={"length": 64})
 def sha256(ctx: GenContext, p: dict) -> str:
     """A hex digest, for commit/content hashes. params: length (default 64)."""
     return ctx.faker.sha256()[: int(p.get("length", 64))]
 
 
-@generator("http_method")
+@generator("http_method", example={"values": ["GET", "POST"], "weights": [0.8, 0.2]})
 def http_method(ctx: GenContext, p: dict) -> str:
     """params: values/weights override the defaults (GET-heavy)."""
     values = p.get("values", ["GET", "POST", "PUT", "PATCH", "DELETE"])
@@ -448,7 +472,7 @@ def http_status(ctx: GenContext, p: dict) -> int:
     return int(ctx.rng.choices(values, weights=weights, k=1)[0])
 
 
-@generator("port")
+@generator("port", example={"min": 1024, "max": 65535})
 def port(ctx: GenContext, p: dict) -> int:
     return ctx.rng.randint(int(p.get("min", 1024)), int(p.get("max", 65535)))
 
@@ -464,7 +488,7 @@ def ulid(ctx: GenContext, p: dict) -> str:
     return ts + rand
 
 
-@generator("api_key")
+@generator("api_key", example={"prefix": "sk-", "length": 32})
 def api_key(ctx: GenContext, p: dict) -> str:
     """Fake API-key-shaped token. params: prefix (default 'sk-'),
     length (random part, default 32)."""
@@ -589,13 +613,16 @@ def job_title(ctx: GenContext, p: dict) -> str:
     return ctx.faker.job()
 
 
-@generator("age")
+@generator("age", example={"min": 18, "max": 90})
 def age(ctx: GenContext, p: dict) -> int:
     """Integer age. params: min (default 18), max (default 90)."""
     return ctx.rng.randint(int(p.get("min", 18)), int(p.get("max", 90)))
 
 
-@generator("gender")
+@generator(
+    "gender",
+    example={"values": ["Female", "Male", "Non-binary"], "weights": [0.49, 0.49, 0.02]},
+)
 def gender(ctx: GenContext, p: dict) -> str:
     """Weighted gender label. params: values/weights override the defaults
     (Female/Male/Non-binary)."""

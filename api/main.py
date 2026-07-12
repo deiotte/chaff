@@ -20,7 +20,11 @@ from pydantic import BaseModel
 from chaff import __version__, library
 from chaff.engine import effective_row_count, generate_records
 from chaff.formats import get_encoder, get_extension, list_formats
-from chaff.generators import list_generator_groups, list_generators
+from chaff.generators import (
+    list_generator_examples,
+    list_generator_groups,
+    list_generators,
+)
 from chaff.sinks import list_sinks
 from chaff.spec import DatasetSpec
 from chaff.updaters import list_updaters
@@ -72,6 +76,8 @@ def registry():
     return {
         "generators": list_generators(),                # flat list (back-compat)
         "generator_groups": list_generator_groups(),     # grouped for the dropdown
+        "generator_examples": list_generator_examples(),  # gen_id -> params example
+
         "formats": list_formats(),
         "sinks": list_sinks(),
         "updaters": list_updaters(),
