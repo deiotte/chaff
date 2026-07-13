@@ -156,6 +156,12 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+// Escape untrusted text before it goes into innerHTML. Column names, cell
+// values, and other user/generated strings are attacker-controllable, so any
+// interpolation into markup must pass through here to avoid DOM XSS.
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
 let GENERATORS = [];
 let GEN_GROUPS = [];
 // gen_id -> params example {…}, straight from the registry (INV-4). Drives the
@@ -236,7 +242,7 @@ function classifyOperand(v, cols) {
 
 function refreshFxList(colDiv, listId) {
   const dl = document.getElementById(listId);
-  if (dl) dl.innerHTML = columnsBefore(colDiv).map(n => `<option value="${n}"></option>`).join('');
+  if (dl) dl.innerHTML = columnsBefore(colDiv).map(n => `<option value="${esc(n)}"></option>`).join('');
 }
 
 function assembleFx(colDiv, par) {
@@ -412,9 +418,9 @@ function renderPreview(rows) {
   if (!rows.length) { el.className = 'empty'; el.textContent = 'No rows.'; return; }
   el.className = '';
   const cols = Object.keys(rows[0]);
-  const head = '<tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>';
+  const head = '<tr>' + cols.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
   const body = rows.map(r => '<tr>' + cols.map(c =>
-    `<td>${r[c] === null ? '<span style="color:#aaa">null</span>' : String(r[c])}</td>`).join('') + '</tr>').join('');
+    `<td>${r[c] === null ? '<span style="color:#aaa">null</span>' : esc(r[c])}</td>`).join('') + '</tr>').join('');
   el.innerHTML = `<table>${head}${body}</table>`;
 }
 
@@ -449,9 +455,9 @@ async function refreshLibrary() {
     const card = document.createElement('button');
     card.className = 'spec-card';
     card.innerHTML =
-      `<div class="nm">${s.name}<span class="badge ${s.source}">${s.source}</span></div>
-       <div class="meta">${s.rows ?? '?'} rows · ${s.columns ?? '?'} cols · ${s.format ?? '?'}</div>` +
-      (s.description ? `<div class="desc">${s.description}</div>` : '');
+      `<div class="nm">${esc(s.name)}<span class="badge ${esc(s.source)}">${esc(s.source)}</span></div>
+       <div class="meta">${esc(s.rows ?? '?')} rows · ${esc(s.columns ?? '?')} cols · ${esc(s.format ?? '?')}</div>` +
+      (s.description ? `<div class="desc">${esc(s.description)}</div>` : '');
     card.onclick = () => loadNamed(s.name);
     g.appendChild(card);
   });
