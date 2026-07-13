@@ -119,7 +119,7 @@ docker compose --profile streaming up --build  # + a Kafka broker for sink dev
   today; delivery via file or streaming **HTTP POST / Kafka / TCP / UDP**
   (ADR-0007) — any format, any compatible sink. Moving entities + CoT + a
   udp/tcp sink = a live synthetic **TAK** feed.
-- **Semantic generators** (ADR-0003): "full_name", "pattern: DEA-####-?????",
+- **Semantic generators** (ADR-0003): "full_name", "pattern: ABC-####-?????",
   "70% Open / 20% Pending / 10% Closed" — not VARCHARs. Includes real-world
   **distributions** (lognormal, exponential, poisson, power_law),
   **web/telemetry** types (ipv4, user_agent, http_status, ulid, …), and
