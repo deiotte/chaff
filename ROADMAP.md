@@ -115,9 +115,11 @@ adds continuous/serve semantics and new transports.
       Whole-file formats + multi-table specs are refused up front.
 - [ ] UI live-feed view: a "watch it stream" panel that opens the socket and
       shows records arriving (the D4O payoff — office Joe sees it move).
-- [ ] **MQTT publish sink:** `@stream_sink("mqtt")` (paho-mqtt under the
+- [x] **MQTT publish sink:** `@stream_sink("mqtt")` (paho-mqtt under the
       `streaming` extra), same shape as kafka — publish per record to a topic,
-      fail loud on broker-unreachable, fake-client unit test + compose fixture.
+      qos 0/1/2, secrets from options/env (never logged), fail loud on
+      broker-unreachable. Fake-client unit tests + a Mosquitto broker in the
+      compose `streaming` profile for live round-trips.
 - [ ] Streaming lifecycle for operability (D4O): start/stop/status for a
       long-running stream, launchable from the UI/API — closes the job-queue
       TODO parked in ADR-0007.

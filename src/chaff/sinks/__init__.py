@@ -132,6 +132,7 @@ def file_sink(spec: DatasetSpec, payload: bytes) -> str:
 
 
 # Streaming sinks registered for their side-effect. `raw` (tcp/udp) is
-# stdlib-only and always available; `http`/`kafka` keep their heavy import
-# (httpx, confluent-kafka) lazy so core `import chaff.sinks` stays dep-free.
-from . import http, kafka, raw  # noqa: E402,F401
+# stdlib-only and always available; `http`/`kafka`/`mqtt` keep their heavy
+# import (httpx, confluent-kafka, paho-mqtt) lazy so `import chaff.sinks`
+# stays dep-free.
+from . import http, kafka, mqtt, raw  # noqa: E402,F401
