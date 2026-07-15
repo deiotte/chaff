@@ -33,3 +33,16 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  # Phase 6 dev fixture: a broker for mqtt sink development (Mosquitto).
+  # Not a product dependency. Same `--profile streaming` as kafka. Anonymous
+  # access on 1883 — a dev fixture, never a production posture.
+  mqtt:
+    profiles: ["streaming"]
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    command: >
+      sh -c "printf 'listener 1883 0.0.0.0\nallow_anonymous true\n'
+      > /mosquitto/config/mosquitto.conf
+      && exec mosquitto -c /mosquitto/config/mosquitto.conf"

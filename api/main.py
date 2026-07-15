@@ -7,27 +7,31 @@ hands them to the engine (INV-1). Run: uvicorn api.main:app --reload
 
 from __future__ import annotations
 
+import asyncio
 import html
+import json
+import math
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Iterator, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from chaff import __version__, library
-from chaff.engine import effective_row_count, generate_records
-from chaff.formats import get_encoder, get_extension, list_formats
+from chaff.engine import effective_row_count, generate_records, iter_records
+from chaff.formats import get_encoder, get_extension, get_record_encoder, list_formats
 from chaff.generators import (
     list_generator_examples,
     list_generator_groups,
     list_generators,
 )
 from chaff.sinks import list_sinks
-from chaff.spec import DatasetSpec
+from chaff.spec import DatasetSpec, load_spec
 from chaff.updaters import list_updaters
 
 app = FastAPI(title="chaff", version=__version__)
@@ -146,6 +150,106 @@ def generate(spec: DatasetSpec):
             "Content-Length": str(len(payload)),
         },
     )
+
+
+# ── Live stream (serve, not download) — Phase 6, ADR-0016 ────────────
+# chaff *is* the server here: a client opens the socket, sends a spec, and
+# chaff streams paced, encoded records back until the client disconnects or a
+# duration/max_records bound is hit. No external broker (that's the kafka/mqtt
+# push sinks). The spec's own `sink` is ignored — the socket is the delivery.
+#
+# Protocol:
+#   1. client connects to /stream (run-mode via query params below)
+#   2. client sends ONE text frame: the DatasetSpec as JSON
+#   3. server streams record frames (text), one encoded record per frame,
+#      then closes the socket to mark end-of-stream
+#   On a bad spec / unstreamable format the server sends a single
+#   {"error": "..."} JSON frame and closes without streaming.
+#
+# Query params (delivery session, not data): rate (records/sec),
+# duration (seconds), max_records. Mirrors the streaming sink options so the
+# same spec streams the same way to a socket or a broker.
+
+STREAM_DEFAULT_CAP = 10_000  # a plain connect (no bound) serves at most this
+
+
+def _q_float(value: Optional[str]) -> Optional[float]:
+    try:
+        return float(value) if value not in (None, "") else None
+    except ValueError:
+        return None
+
+
+def _q_int(value: Optional[str]) -> Optional[int]:
+    try:
+        return int(value) if value not in (None, "") else None
+    except ValueError:
+        return None
+
+
+def _resolve_stream_limit(spec: DatasetSpec, max_records: Optional[int],
+                          duration: Optional[float]) -> float | int:
+    """How many records to serve. Explicit `max_records` wins; a `duration`
+    with no cap streams unbounded (the clock cuts it); otherwise serve the
+    spec's natural length, capped so a plain connect can't run away."""
+    if max_records is not None:
+        return max_records
+    if duration is not None:
+        return math.inf
+    return min(effective_row_count(spec), STREAM_DEFAULT_CAP)
+
+
+@app.websocket("/stream")
+async def stream(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        raw = await websocket.receive_text()
+    except WebSocketDisconnect:
+        return
+
+    try:
+        spec = load_spec(json.loads(raw))
+    except (json.JSONDecodeError, ValidationError, ValueError) as e:
+        await websocket.send_json({"error": f"invalid spec: {e}"})
+        await websocket.close()
+        return
+
+    if spec.tables:
+        await websocket.send_json(
+            {"error": "multi-table specs can't be streamed (one file per table); use the CLI"})
+        await websocket.close()
+        return
+    try:
+        rec_enc = get_record_encoder(spec.output.format)
+    except KeyError as e:
+        # Whole-file formats (sql, parquet, …) have no per-record framing.
+        await websocket.send_json({"error": str(e)})
+        await websocket.close()
+        return
+
+    qp = websocket.query_params
+    rate = _q_float(qp.get("rate"))
+    duration = _q_float(qp.get("duration"))
+    max_records = _q_int(qp.get("max_records"))
+    limit = _resolve_stream_limit(spec, max_records, duration)
+    interval = 1.0 / rate if rate and rate > 0 else 0.0
+
+    start = time.monotonic()
+    sent = 0
+    try:
+        for row in iter_records(spec, limit=limit):
+            if duration and (time.monotonic() - start) >= duration:
+                break
+            if interval and sent:
+                await asyncio.sleep(interval)  # async pacing: never blocks the loop
+            # Per-record encoders append a trailing newline (ndjson/csv line);
+            # one clean record per frame reads better over a socket.
+            await websocket.send_text(rec_enc(spec, row).decode("utf-8").rstrip("\n"))
+            sent += 1
+    except WebSocketDisconnect:
+        return  # client hung up mid-stream — stop generating, we're done
+
+    await websocket.close()  # closing the socket marks end-of-stream
 
 
 # ── Spec library (presets + saved schemas) ──────────────────────────

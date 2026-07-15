@@ -117,6 +117,36 @@ def test_http_sink_raises_loud_on_4xx():
     assert len(store) == 1  # 4xx is not retried
 
 
+def _delivered_records(store):
+    return [json.loads(line) for s in store
+            for line in s["body"].decode().splitlines() if line]
+
+
+def test_streaming_max_records_caps_delivery():
+    """max_records below the spec's row count cuts the stream short (ADR-0016),
+    end to end through run() and a real sink."""
+    pytest.importorskip("httpx")
+    store = []
+    with capture_server(_recording_handler(store)) as url:
+        spec = base_stream_spec(url=f"{url}/ingest", batch_size=100, rate=0, max_records=3)
+        receipt = run(spec)  # spec has rows=5
+    assert len(_delivered_records(store)) == 3
+    assert "delivered 3 record(s)" in receipt
+
+
+def test_streaming_max_records_extends_past_rows():
+    """max_records above the row count keeps generating deterministically past
+    the natural length — continuous streaming from a fixed spec."""
+    pytest.importorskip("httpx")
+    store = []
+    with capture_server(_recording_handler(store)) as url:
+        spec = base_stream_spec(url=f"{url}/ingest", batch_size=100, rate=0, max_records=8)
+        run(spec)  # spec has rows=5
+    records = _delivered_records(store)
+    assert len(records) == 8
+    assert [r["id"] for r in records] == list(range(1, 9))  # row_id keeps counting
+
+
 def test_http_sink_retries_5xx_then_succeeds():
     pytest.importorskip("httpx")
     attempts = {"n": 0}

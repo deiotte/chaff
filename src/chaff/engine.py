@@ -12,15 +12,22 @@ before — byte-for-byte identical (INV-3).
 
 from __future__ import annotations
 
+import math
 import random
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from faker import Faker
 
 from .formats import get_encoder, get_extension, get_record_encoder
 from .generators import GenContext, get_generator
-from .sinks import get_sink, get_stream_sink, is_stream_sink, rate_limited
+from .sinks import (
+    get_sink,
+    get_stream_sink,
+    is_stream_sink,
+    rate_limited,
+    time_limited,
+)
 from .spec import DatasetSpec
 from .updaters import EntityContext, get_updater
 
@@ -33,12 +40,18 @@ def _seeded(spec: DatasetSpec) -> tuple[random.Random, Faker]:
     return rng, faker
 
 
-def _generate_table(rng, faker, columns, n_rows, tables=None) -> list[dict[str, Any]]:
-    """Generate one table's rows from a shared rng/faker. `tables` (already
-    generated parents) is threaded to fk generators; None for single-table."""
+def _iter_table(rng, faker, columns, n_rows, tables=None) -> Iterator[dict[str, Any]]:
+    """Yield one generated row at a time from a shared rng/faker.
+
+    `n_rows` may be an int or `math.inf` (unbounded streaming, ADR-0016).
+    Rows come out in a fixed order and the rng is consumed identically
+    whatever `n_rows` is, so any prefix of the sequence is deterministic —
+    this is the one generation path behind both the eager list builders and
+    the lazy streaming iterators, so they can never drift apart. `tables`
+    (already generated parents) is threaded to fk generators; None single-table."""
     resolved = [(col, get_generator(col.generator)) for col in columns]
-    rows: list[dict[str, Any]] = []
-    for i in range(n_rows):
+    i = 0
+    while i < n_rows:
         # `row` is filled in column order; ctx.row is the same dict, so a
         # `derived` column reads the cells generated before it (ADR-0012).
         # `cache` is per-row scratch for coherent geo linking (ADR-0015).
@@ -52,14 +65,31 @@ def _generate_table(rng, faker, columns, n_rows, tables=None) -> list[dict[str, 
                 row[col.name] = None
             else:
                 row[col.name] = fn(ctx, col.params)
-        rows.append(row)
-    return rows
+        yield row
+        i += 1
+
+
+def _generate_table(rng, faker, columns, n_rows, tables=None) -> list[dict[str, Any]]:
+    """Eager list form of `_iter_table` (multi-table + fixed-count paths)."""
+    return list(_iter_table(rng, faker, columns, n_rows, tables))
 
 
 def generate_rows(spec: DatasetSpec) -> list[dict[str, Any]]:
     """Generate all rows for the (primary) table. Deterministic under seed."""
     rng, faker = _seeded(spec)
     return _generate_table(rng, faker, spec.columns, spec.rows)
+
+
+def iter_rows(spec: DatasetSpec, *, limit: float | int | None = None) -> Iterator[dict[str, Any]]:
+    """Lazily yield single-table rows, one at a time (ADR-0016).
+
+    `limit=None` → `spec.rows` (unchanged length); an int caps or *extends*
+    to exactly that many rows; `math.inf` streams unbounded. The i-th row is
+    identical whatever `limit` is, so `list(iter_rows(spec)) == generate_rows(spec)`
+    byte-for-byte and any prefix is a deterministic prefix (INV-3)."""
+    rng, faker = _seeded(spec)
+    n = spec.rows if limit is None else limit
+    yield from _iter_table(rng, faker, spec.columns, n)
 
 
 # ── Multi-table (ADR-0008) ───────────────────────────────────────────
@@ -128,13 +158,16 @@ def generate_tables(spec: DatasetSpec) -> dict[str, list[dict[str, Any]]]:
 
 # ── Stateful entities (ADR-0009) ─────────────────────────────────────
 
-def generate_entity_rows(spec: DatasetSpec) -> list[dict[str, Any]]:
-    """Generate `count` entities over `ticks` time steps.
+def iter_entity_rows(spec: DatasetSpec, *, limit: float | int | None = None) -> Iterator[dict[str, Any]]:
+    """Lazily yield entity snapshots, time-ordered (ADR-0016).
 
     Each entity's initial state comes from the spec's columns (tick 0), then
     per-tick `updates` mutate it. Output is one snapshot per (tick, entity),
-    time-ordered (all entities at tick 0, then tick 1, …). Deterministic: one
-    rng/faker seeded once and consumed in a fixed order.
+    all entities at tick 0, then tick 1, …. `limit=None` → `count × ticks`
+    (unchanged); an int caps the total snapshots; `math.inf` ticks forever —
+    a live feed of moving entities. Per-tick updates are applied to every
+    entity *before* that tick is emitted and the rng is consumed the same way
+    whatever `limit` is, so any prefix is a deterministic prefix (INV-3).
     """
     ent = spec.entity
     rng, faker = _seeded(spec)
@@ -163,24 +196,51 @@ def generate_entity_rows(spec: DatasetSpec) -> list[dict[str, Any]]:
                 state[col.name] = fn(gctx, col.params)
         states.append(state)
 
-    rows: list[dict[str, Any]] = []
-    for t in range(ent.ticks):
+    cap = ent.count * ent.ticks if limit is None else limit
+    emitted = 0
+    t = 0
+    while emitted < cap:
         if t > 0:
             for e in range(ent.count):
                 ectx = EntityContext(rng=rng, faker=faker, entity_index=e, tick=t)
                 for upd_fn, params in updates:
                     upd_fn(ectx, states[e], params)
         for e in range(ent.count):
+            if emitted >= cap:
+                break
             row = {ent.id_column: ids[e], ent.tick_column: t}
             row.update(states[e])  # snapshot of current state
-            rows.append(row)
-    return rows
+            yield row
+            emitted += 1
+        t += 1
+
+
+def generate_entity_rows(spec: DatasetSpec) -> list[dict[str, Any]]:
+    """Eager form: `count × ticks` time-ordered snapshots (unchanged output)."""
+    return list(iter_entity_rows(spec))
 
 
 def generate_records(spec: DatasetSpec) -> list[dict[str, Any]]:
     """Rows for a single-table or entity spec (not multi-table). The one
     entry point the API/preview use so both modes are handled uniformly."""
     return generate_entity_rows(spec) if spec.entity else generate_rows(spec)
+
+
+def iter_records(spec: DatasetSpec, *, limit: float | int | None = None) -> Iterator[dict[str, Any]]:
+    """Lazy per-record generation for streaming and serving (ADR-0016).
+
+    Yields the same rows `generate_records` would, one at a time, without
+    materializing a list — so a stream can outrun memory or run forever.
+    `limit` controls how many: `None` = the spec's natural length, an int =
+    exactly that many (may exceed or fall short of the natural length),
+    `math.inf` = unbounded. Determinism is per-record: the i-th record
+    depends only on the spec, its seed, and i — never on `limit` or the
+    wall-clock. Multi-table specs don't stream (whole-file per table); the
+    engine routes those to `_run_multi` before reaching here."""
+    if spec.entity:
+        yield from iter_entity_rows(spec, limit=limit)
+    else:
+        yield from iter_rows(spec, limit=limit)
 
 
 def effective_row_count(spec: DatasetSpec) -> int:
@@ -208,15 +268,25 @@ def run(spec: DatasetSpec) -> str:
     if spec.tables:
         return _run_multi(spec)
 
-    rows = generate_records(spec)  # single-table or entity ticks
     sink_id = spec.sink.sink
 
     if is_stream_sink(sink_id):
-        rec_enc = get_record_encoder(spec.output.format)
-        records = (rec_enc(spec, r) for r in rows)
-        paced = rate_limited(records, spec.sink.options.get("rate"))
+        # Lazy path (ADR-0016): records are generated one at a time as the
+        # sink consumes them, so a stream can run past memory or run forever.
+        rec_enc = get_record_encoder(spec.output.format)  # fail fast before the network
+        opts = spec.sink.options
+        max_records = opts.get("max_records")
+        duration = opts.get("duration")
+        # A duration bound with no explicit record cap means "stream until the
+        # clock runs out" — generate unbounded and let time_limited do the cut.
+        limit = math.inf if (max_records is None and duration) else max_records
+        records = (rec_enc(spec, r) for r in iter_records(spec, limit=limit))
+        paced = rate_limited(records, opts.get("rate"))
+        if duration:
+            paced = time_limited(paced, float(duration))
         receipt = get_stream_sink(sink_id)(spec, paced)
     else:
+        rows = generate_records(spec)  # single-table or entity ticks
         payload = get_encoder(spec.output.format)(spec, rows)
         receipt = get_sink(sink_id)(spec, payload)
 

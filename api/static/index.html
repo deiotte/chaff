@@ -71,6 +71,10 @@
                      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .save-row { display:flex; gap:8px; margin-top:12px; align-items:center; }
   .save-row input { max-width:220px; }
+  .feed { max-height:260px; overflow:auto; margin:12px 0 0; padding:12px;
+          background:#0f1115; color:#d7e2dd; border:1px solid var(--line); border-radius:8px;
+          font:12px/1.5 ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-word; }
+  .feed.empty { color:var(--muted); background:var(--card); }
 </style>
 </head>
 <body>
@@ -147,6 +151,22 @@
   <section class="card">
     <h2>Preview <span style="font-weight:400;text-transform:none;letter-spacing:0">(first rows)</span></h2>
     <div class="preview-wrap"><div id="preview" class="empty">Click Preview to see sample rows.</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Live stream <span style="font-weight:400;text-transform:none;letter-spacing:0">— serve records over a WebSocket, paced (chaff is the server; no download)</span></h2>
+    <div class="row3">
+      <div><label>Rate (records/sec — blank = as fast as it drains)</label><input id="strRate" type="number" min="0" step="1" placeholder="e.g. 5"></div>
+      <div><label>Duration (seconds — blank = until stopped/limit)</label><input id="strDuration" type="number" min="0" step="1" placeholder="e.g. 10"></div>
+      <div><label>Max records (blank = the row count above)</label><input id="strMax" type="number" min="1" placeholder="e.g. 200"></div>
+    </div>
+    <p class="hint">Streams the spec below over <code>/stream</code>. A duration with no max keeps generating past the row count — a live feed. Use a record format (ndjson/json/csv).</p>
+    <div class="actions" style="margin-top:10px">
+      <button class="btn" id="streamBtn">Start streaming</button>
+      <button class="btn ghost" id="stopBtn" disabled>Stop</button>
+      <span class="msg" id="strMsg"></span>
+    </div>
+    <pre id="feed" class="feed empty">Start a stream to watch records arrive live.</pre>
   </section>
 
   <footer style="text-align:center;color:var(--muted);font-size:12px;padding:4px 0 8px">
@@ -511,11 +531,80 @@ async function doDraft() {
   m.className = 'msg ok'; m.textContent = 'Drafted — review and tweak below.';
 }
 
+// ── Live stream (serve over WebSocket) ───────────────────────────
+// chaff serves the spec below over /stream; records arrive frame-by-frame.
+// The spec's `sink` is irrelevant here — the socket is the delivery.
+let _ws = null;
+function setStrMsg(text, kind) { const m = $('strMsg'); m.textContent = text; m.className = 'msg ' + (kind || ''); }
+
+function streamUrl() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const p = new URLSearchParams();
+  const rate = $('strRate').value.trim(); if (rate) p.set('rate', rate);
+  const dur = $('strDuration').value.trim(); if (dur) p.set('duration', dur);
+  const max = $('strMax').value.trim(); if (max) p.set('max_records', max);
+  const qs = p.toString();
+  return `${proto}//${location.host}/stream${qs ? '?' + qs : ''}`;
+}
+
+function stopStream() {
+  if (_ws) { const w = _ws; _ws = null; try { w.close(); } catch (e) {} }
+  $('streamBtn').disabled = false;
+  $('stopBtn').disabled = true;
+}
+
+function doStream() {
+  let spec;
+  try { spec = buildSpec(); } catch (e) { return setStrMsg(e.message, 'err'); }
+  if (!spec.columns.length) return setStrMsg('Add at least one column.', 'err');
+  stopStream();  // close any prior stream first
+
+  const feed = $('feed');
+  feed.className = 'feed'; feed.textContent = '';
+  let count = 0;
+  let ws;
+  try { ws = new WebSocket(streamUrl()); }
+  catch (e) { return setStrMsg('Could not open stream: ' + e.message, 'err'); }
+  _ws = ws;
+  $('streamBtn').disabled = true; $('stopBtn').disabled = false;
+  setStrMsg('Connecting…');
+
+  ws.onopen = () => { ws.send(JSON.stringify(spec)); setStrMsg('Streaming…'); };
+  ws.onmessage = (ev) => {
+    // Control/error frames ({"error": …}) only ever arrive before any record,
+    // so only sniff for them while the count is still zero — a data record is
+    // never misread as an error.
+    if (count === 0) {
+      try {
+        const o = JSON.parse(ev.data);
+        if (o && typeof o === 'object' && !Array.isArray(o) && 'error' in o) {
+          return setStrMsg(o.error, 'err');
+        }
+      } catch (e) { /* not JSON — a plain record (csv line), fall through */ }
+    }
+    count++;
+    // textContent append (never innerHTML) so record content can't inject markup.
+    feed.appendChild(document.createTextNode(ev.data + '\n'));
+    while (feed.childNodes.length > 500) feed.removeChild(feed.firstChild);  // cap DOM growth
+    feed.scrollTop = feed.scrollHeight;                                       // pin to newest
+    setStrMsg(count + ' records', 'ok');
+  };
+  ws.onclose = () => {
+    if (_ws === ws) {
+      _ws = null; $('streamBtn').disabled = false; $('stopBtn').disabled = true;
+      setStrMsg(count + ' records — stream ended', 'ok');
+    }
+  };
+  ws.onerror = () => setStrMsg('Stream error — is the server reachable?', 'err');
+}
+
 $('addCol').onclick = () => addColumn();
 $('previewBtn').onclick = doPreview;
 $('downloadBtn').onclick = doDownload;
 $('saveBtn').onclick = saveToLibrary;
 $('draftBtn').onclick = doDraft;
+$('streamBtn').onclick = doStream;
+$('stopBtn').onclick = () => { stopStream(); setStrMsg('Stopped', 'ok'); };
 $('nlKey').onchange = saveKey;
 $('nlProvider').onchange = saveKey;
 loadKey();

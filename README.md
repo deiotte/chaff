@@ -107,7 +107,7 @@ chaff generate examples/crm_contacts.json --seed 7 --rows 50 -o small.csv
 
 pip install -e '.[api]'                      # then `make run-api` for the UI
 pip install -e '.[formats-extra]'            # Excel (.xlsx), Parquet, Avro
-docker compose --profile streaming up --build  # + a Kafka broker for sink dev
+docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink dev
 ```
 
 ## The idea
@@ -116,9 +116,15 @@ docker compose --profile streaming up --build  # + a Kafka broker for sink dev
 
 - **Spec is the product** (ADR-0001): UI/CLI/API all just build specs.
 - **Format ≠ sink** (ADR-0002): CSV/TSV/JSON/NDJSON/SQL/XLSX/XML/Parquet/Avro/CoT
-  today; delivery via file or streaming **HTTP POST / Kafka / TCP / UDP**
+  today; delivery via file or streaming **HTTP POST / Kafka / MQTT / TCP / UDP**
   (ADR-0007) — any format, any compatible sink. Moving entities + CoT + a
   udp/tcp sink = a live synthetic **TAK** feed.
+- **Serve a live stream, don't just download one** (ADR-0016): generation is
+  lazy and can run past the row count or unbounded, paced by rate/duration.
+  Push it to a broker (Kafka/MQTT), or let a consumer connect straight to
+  chaff over the **`/stream` WebSocket** and watch records arrive — there's a
+  "Live stream" panel right in the UI. Determinism holds per-record: the i-th
+  record is always the same, whatever the stream's length.
 - **Semantic generators** (ADR-0003): "full_name", "pattern: ABC-####-?????",
   "70% Open / 20% Pending / 10% Closed" — not VARCHARs. Includes real-world
   **distributions** (lognormal, exponential, poisson, power_law),
