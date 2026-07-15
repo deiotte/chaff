@@ -98,3 +98,72 @@ def test_generate_rejects_oversized_request(monkeypatch):
 def test_generate_unknown_format_is_400():
     resp = client.post("/generate", json=spec_dict(output={"format": "nope"}))
     assert resp.status_code == 400
+
+
+# ── WebSocket live stream (serve, not download) — Phase 6 ────────────
+
+import json  # noqa: E402
+
+from fastapi import WebSocketDisconnect  # noqa: E402
+
+
+def stream_spec(**over):
+    d = spec_dict(output={"format": "ndjson"})
+    d.update(over)
+    return d
+
+
+def test_ws_streams_records_then_closes():
+    """chaff serves records over the socket and closing the socket marks the
+    end of the stream."""
+    with client.websocket_connect("/stream?max_records=3") as ws:
+        ws.send_text(json.dumps(stream_spec()))
+        frames = [json.loads(ws.receive_text()) for _ in range(3)]
+        with pytest.raises(WebSocketDisconnect):
+            ws.receive_text()  # end-of-stream = socket close
+    assert [f["id"] for f in frames] == [1, 2, 3]
+    assert all("who" in f for f in frames)
+
+
+def test_ws_extends_past_natural_length():
+    """A fixed spec can serve a longer feed than its row count (ADR-0016)."""
+    with client.websocket_connect("/stream?max_records=5") as ws:
+        ws.send_text(json.dumps(stream_spec(rows=2)))
+        frames = [json.loads(ws.receive_text()) for _ in range(5)]
+    assert [f["id"] for f in frames] == [1, 2, 3, 4, 5]
+
+
+def test_ws_serves_deterministic_prefix():
+    """The i-th served record matches the eager engine output for the same
+    spec — the socket is just a delivery of the deterministic sequence."""
+    spec = load_spec(stream_spec(rows=4))
+    expected = generate_rows(spec)
+    with client.websocket_connect("/stream?max_records=4") as ws:
+        ws.send_text(json.dumps(stream_spec(rows=4)))
+        served = [json.loads(ws.receive_text()) for _ in range(4)]
+    assert served == expected
+
+
+def test_ws_rejects_whole_file_format():
+    with client.websocket_connect("/stream") as ws:
+        ws.send_text(json.dumps(stream_spec(output={"format": "sql"})))
+        msg = ws.receive_json()
+    assert "no per-record encoder" in msg["error"]
+
+
+def test_ws_rejects_multitable():
+    d = stream_spec(tables=[{
+        "name": "lines", "rows": 3,
+        "columns": [{"name": "sku", "generator": "row_id"}],
+    }])
+    with client.websocket_connect("/stream") as ws:
+        ws.send_text(json.dumps(d))
+        msg = ws.receive_json()
+    assert "multi-table" in msg["error"]
+
+
+def test_ws_invalid_spec_reports_error():
+    with client.websocket_connect("/stream") as ws:
+        ws.send_text(json.dumps({"name": "x"}))  # missing columns/output
+        msg = ws.receive_json()
+    assert "invalid spec" in msg["error"]

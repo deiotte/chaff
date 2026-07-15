@@ -106,11 +106,15 @@ adds continuous/serve semantics and new transports.
       `max_records` and `duration` (`time_limited`, a wall-clock cut next to
       `rate_limited`). INV-3 restated: record *content* is reproducible; record
       *count* under a duration bound is not. Eager download paths byte-identical.
-- [ ] **WebSocket serve endpoint:** a `/stream` WebSocket on the FastAPI app —
-      client connects with a spec, chaff streams paced encoded records over the
-      socket until the client disconnects (or duration/max_records). chaff *is*
-      the server; no external broker. Reuses the per-record encoders +
-      `rate_limited`. The UI can show a live feed moving.
+- [x] **WebSocket serve endpoint:** `/stream` on the FastAPI app — client
+      connects, sends a spec, chaff streams paced encoded records over the
+      socket until the client disconnects (or duration/max_records); closing
+      the socket marks end-of-stream. chaff *is* the server; no external
+      broker. Async pacing (never blocks the loop), run-mode via query params
+      (`rate`/`duration`/`max_records`) mirroring the streaming sink options.
+      Whole-file formats + multi-table specs are refused up front.
+- [ ] UI live-feed view: a "watch it stream" panel that opens the socket and
+      shows records arriving (the D4O payoff — office Joe sees it move).
 - [ ] **MQTT publish sink:** `@stream_sink("mqtt")` (paho-mqtt under the
       `streaming` extra), same shape as kafka — publish per record to a topic,
       fail loud on broker-unreachable, fake-client unit test + compose fixture.
