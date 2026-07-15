@@ -94,6 +94,40 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
 - [ ] Code-signing (Authenticode) to drop the SmartScreen "Run anyway" prompt.
 - [ ] macOS `.app` bundle / Windows MSI installer with a Start-menu shortcut.
 
+## Phase 6 — Serve a live stream (not just build one to download)
+Turn chaff from "generate a file and download it" into something that can
+*serve* a data stream. Sequenced: the lazy-generation keystone unblocks the
+rest. Push sinks (kafka/http/tcp/udp) already ship from Phase 2 — this phase
+adds continuous/serve semantics and new transports.
+- [x] **Keystone — lazy generation + determinism-as-prefix (ADR-0016):**
+      `iter_records(spec, limit=…)` yields rows one at a time (`None` = natural
+      length, int = cap/extend, `math.inf` = unbounded). One generation path
+      behind eager + lazy, so no drift. Streaming run-mode on `sink.options`:
+      `max_records` and `duration` (`time_limited`, a wall-clock cut next to
+      `rate_limited`). INV-3 restated: record *content* is reproducible; record
+      *count* under a duration bound is not. Eager download paths byte-identical.
+- [ ] **WebSocket serve endpoint:** a `/stream` WebSocket on the FastAPI app —
+      client connects with a spec, chaff streams paced encoded records over the
+      socket until the client disconnects (or duration/max_records). chaff *is*
+      the server; no external broker. Reuses the per-record encoders +
+      `rate_limited`. The UI can show a live feed moving.
+- [ ] **MQTT publish sink:** `@stream_sink("mqtt")` (paho-mqtt under the
+      `streaming` extra), same shape as kafka — publish per record to a topic,
+      fail loud on broker-unreachable, fake-client unit test + compose fixture.
+- [ ] Streaming lifecycle for operability (D4O): start/stop/status for a
+      long-running stream, launchable from the UI/API — closes the job-queue
+      TODO parked in ADR-0007.
+
+### Deferred (weird outliers — seams noted, not built)
+- gRPC server-streaming RPC: the enterprise-grade serve option (backpressure,
+  bidirectional). New interface (INV-1 holds: still a DatasetSpec) + `.proto` +
+  `grpcio`. Revisit if a consumer actually needs it.
+- protobuf record encoder: a new format on the encoder axis (like avro), with
+  a schema/descriptor generated from the spec's columns. Pairs with any
+  streaming transport. Revisit alongside gRPC.
+- tokio: N/A — a Rust async runtime; chaff is single-language Python. The
+  concurrency need it implies is served by asyncio (FastAPI) on the serve paths.
+
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
 - Data anonymization / production-data masking (that's Tonic's lane; chaff

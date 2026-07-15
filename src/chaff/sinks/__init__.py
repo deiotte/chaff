@@ -95,6 +95,31 @@ def rate_limited(
         yield item
 
 
+def time_limited(
+    items: Iterable[bytes],
+    duration: float | None,
+    *,
+    now: Callable[[], float] = time.monotonic,
+) -> Iterator[bytes]:
+    """Yield from `items` until `duration` seconds elapse, then stop.
+
+    A delivery-time bound for open-ended streams (unbounded generation /
+    serve-forever): it decides *where to cut*, never *what the bytes are*, so
+    INV-3 holds — whatever records come out are a deterministic prefix
+    (ADR-0016). `duration` None/<=0 means no bound. `now` is injectable so
+    tests bound against a fake clock. Note the emitted *count* depends on the
+    wall-clock and machine speed, so it is deliberately not reproducible —
+    only the content of each emitted record is."""
+    if not duration or duration <= 0:
+        yield from items
+        return
+    start = now()
+    for item in items:
+        if now() - start >= duration:
+            return
+        yield item
+
+
 @sink("file")
 def file_sink(spec: DatasetSpec, payload: bytes) -> str:
     from ..formats import get_extension  # local import avoids cycle
