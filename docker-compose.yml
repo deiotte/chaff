@@ -5,7 +5,7 @@ services:
       # LLM SDKs baked in. Default covers Anthropic + OpenAI (a key pasted in
       # the UI just works). Add Google: set CHAFF_EXTRAS in .env, then rebuild.
       args:
-        CHAFF_EXTRAS: ${CHAFF_EXTRAS:-api,nl,nl-openai}
+        CHAFF_EXTRAS: ${CHAFF_EXTRAS:-api,streaming,nl,nl-openai}
     ports:
       - "8000:8000"
     # API keys for the "Describe it in English" button. Put one in .env
