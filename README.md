@@ -119,12 +119,14 @@ docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink
   today; delivery via file or streaming **HTTP POST / Kafka / MQTT / TCP / UDP**
   (ADR-0007) — any format, any compatible sink. Moving entities + CoT + a
   udp/tcp sink = a live synthetic **TAK** feed.
-- **Serve a live stream, don't just download one** (ADR-0016): generation is
-  lazy and can run past the row count or unbounded, paced by rate/duration.
-  Push it to a broker (Kafka/MQTT), or let a consumer connect straight to
-  chaff over the **`/stream` WebSocket** and watch records arrive — there's a
-  "Live stream" panel right in the UI. Determinism holds per-record: the i-th
-  record is always the same, whatever the stream's length.
+- **Serve a live stream, don't just download one** (ADR-0016/0017): the UI has
+  a **Stream tab** next to Batch. Watch records arrive live in the page over the
+  **`/stream` WebSocket**, or **push to a broker/endpoint** (Kafka/MQTT/HTTP/
+  TCP/UDP) as a bounded, stoppable server-side job (`/stream/jobs`). Every run
+  is capped (records + seconds, hard-ceilinged) and re-confirms before going
+  again — no runaway feeds. Generation is lazy and can run past the row count;
+  determinism holds per-record: the i-th record is always the same, whatever
+  the stream's length.
 - **Semantic generators** (ADR-0003): "full_name", "pattern: ABC-####-?????",
   "70% Open / 20% Pending / 10% Closed" — not VARCHARs. Includes real-world
   **distributions** (lognormal, exponential, poisson, power_law),

@@ -113,18 +113,22 @@ adds continuous/serve semantics and new transports.
       broker. Async pacing (never blocks the loop), run-mode via query params
       (`rate`/`duration`/`max_records`) mirroring the streaming sink options.
       Whole-file formats + multi-table specs are refused up front.
-- [x] UI live-feed view: a "Live stream" panel that opens the socket and
-      shows records arriving with a running count (the D4O payoff — office Joe
-      sees it move). Rate/duration/max controls; record content appended as
-      text nodes, never innerHTML (XSS-safe). Verified in a real browser.
 - [x] **MQTT publish sink:** `@stream_sink("mqtt")` (paho-mqtt under the
       `streaming` extra), same shape as kafka — publish per record to a topic,
       qos 0/1/2, secrets from options/env (never logged), fail loud on
       broker-unreachable. Fake-client unit tests + a Mosquitto broker in the
       compose `streaming` profile for live round-trips.
-- [ ] Streaming lifecycle for operability (D4O): start/stop/status for a
-      long-running stream, launchable from the UI/API — closes the job-queue
-      TODO parked in ADR-0007.
+- [x] **Streaming lifecycle + Stream tab (ADR-0017):** a Batch/Stream tab
+      split in the UI over one shared spec. The Stream tab surfaces both serve
+      models to Office Joe: **live view** (WebSocket, records into the page) and
+      **push to a broker/endpoint** (Kafka/MQTT/HTTP/TCP/UDP). Push runs as a
+      bounded server-side job — `POST/GET/DELETE /stream/jobs` (Start/Status/
+      Stop) — since the browser can't hold a broker connection. **Guardrail:**
+      every run declares a mandatory record + time cap, each clamped to a hard
+      server ceiling (`CHAFF_STREAM_MAX_RECORDS`/`_SECONDS`); a run that hits a
+      cap re-confirms ("run again?") so nothing floods a pipeline unattended.
+      `streaming` extra baked into the default image. Verified in a real browser
+      (both models, TCP round-trip). Closes the job-queue TODO from ADR-0007.
 
 ### Deferred (weird outliers — seams noted, not built)
 - gRPC server-streaming RPC: the enterprise-grade serve option (backpressure,

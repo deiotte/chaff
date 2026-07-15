@@ -75,6 +75,30 @@
           background:#0f1115; color:#d7e2dd; border:1px solid var(--line); border-radius:8px;
           font:12px/1.5 ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-word; }
   .feed.empty { color:var(--muted); background:var(--card); }
+  .tabs { display:flex; gap:4px; margin-bottom:-20px; }
+  .tab { border:1px solid var(--line); background:#eef1f4; color:var(--muted); padding:10px 20px;
+         font:inherit; font-weight:600; cursor:pointer; border-radius:10px 10px 0 0; }
+  .tab.active { color:var(--ink); background:var(--card); border-bottom-color:var(--card); }
+  .tab .sub { font-weight:400; font-size:12px; color:var(--muted); }
+  .tabpane { display:none; }
+  .tabpane.active { display:grid; gap:20px; }
+  .radio-row { display:flex; flex-wrap:wrap; gap:8px; }
+  .radio-row label { display:flex; align-items:center; gap:6px; padding:7px 12px; border:1px solid var(--line);
+                     border-radius:20px; cursor:pointer; font-size:13px; color:var(--ink); margin:0; width:auto; }
+  .radio-row label.sel { border-color:var(--accent); background:#f0f7f3; color:var(--accent); font-weight:600; }
+  .radio-row input { width:auto; margin:0; }
+  .sink-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-top:14px; }
+  .sink-fields:empty { display:none; }
+  .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; padding:4px 11px; border-radius:20px;
+          background:#eef1f4; color:var(--muted); font-weight:600; }
+  .pill.run { background:#e7f1ec; color:var(--accent); }
+  .pill.err { background:#f6e7e7; color:var(--bad); }
+  .pill .dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .reconfirm { margin-top:12px; padding:11px 13px; border:1px solid #e6d9a8; background:#fbf7e8;
+               border-radius:8px; font-size:13px; display:none; align-items:center;
+               justify-content:space-between; gap:12px; }
+  .reconfirm.show { display:flex; }
+  .reconfirm .btn { padding:7px 14px; }
 </style>
 </head>
 <body>
@@ -135,39 +159,74 @@
     <p class="hint" id="genHint"></p>
   </section>
 
-  <section class="card">
-    <h2>Output</h2>
-    <div class="row3">
-      <div><label>Format</label><select id="format"></select></div>
-      <div></div><div></div>
-    </div>
-    <div class="actions" style="margin-top:16px">
-      <button class="btn ghost" id="previewBtn">Preview</button>
-      <button class="btn" id="downloadBtn">Download</button>
-      <span class="msg" id="msg"></span>
-    </div>
-  </section>
+  <div class="tabs">
+    <button class="tab active" id="tabBtnBatch" data-pane="paneBatch">Batch <span class="sub">· build &amp; download</span></button>
+    <button class="tab" id="tabBtnStream" data-pane="paneStream">Stream <span class="sub">· serve a live feed</span></button>
+  </div>
 
-  <section class="card">
-    <h2>Preview <span style="font-weight:400;text-transform:none;letter-spacing:0">(first rows)</span></h2>
-    <div class="preview-wrap"><div id="preview" class="empty">Click Preview to see sample rows.</div></div>
-  </section>
+  <!-- ── BATCH: the baseline build-a-file flow ── -->
+  <div class="tabpane active" id="paneBatch">
+    <section class="card">
+      <h2>Output</h2>
+      <div class="row3">
+        <div><label>Format</label><select id="format"></select></div>
+        <div></div><div></div>
+      </div>
+      <div class="actions" style="margin-top:16px">
+        <button class="btn ghost" id="previewBtn">Preview</button>
+        <button class="btn" id="downloadBtn">Download</button>
+        <span class="msg" id="msg"></span>
+      </div>
+    </section>
 
-  <section class="card">
-    <h2>Live stream <span style="font-weight:400;text-transform:none;letter-spacing:0">— serve records over a WebSocket, paced (chaff is the server; no download)</span></h2>
-    <div class="row3">
-      <div><label>Rate (records/sec — blank = as fast as it drains)</label><input id="strRate" type="number" min="0" step="1" placeholder="e.g. 5"></div>
-      <div><label>Duration (seconds — blank = until stopped/limit)</label><input id="strDuration" type="number" min="0" step="1" placeholder="e.g. 10"></div>
-      <div><label>Max records (blank = the row count above)</label><input id="strMax" type="number" min="1" placeholder="e.g. 200"></div>
-    </div>
-    <p class="hint">Streams the spec below over <code>/stream</code>. A duration with no max keeps generating past the row count — a live feed. Use a record format (ndjson/json/csv).</p>
-    <div class="actions" style="margin-top:10px">
-      <button class="btn" id="streamBtn">Start streaming</button>
-      <button class="btn ghost" id="stopBtn" disabled>Stop</button>
-      <span class="msg" id="strMsg"></span>
-    </div>
-    <pre id="feed" class="feed empty">Start a stream to watch records arrive live.</pre>
-  </section>
+    <section class="card">
+      <h2>Preview <span style="font-weight:400;text-transform:none;letter-spacing:0">(first rows)</span></h2>
+      <div class="preview-wrap"><div id="preview" class="empty">Click Preview to see sample rows.</div></div>
+    </section>
+  </div>
+
+  <!-- ── STREAM: serve a live feed (both models on one screen) ── -->
+  <div class="tabpane" id="paneStream">
+    <section class="card">
+      <h2>Deliver to <span style="font-weight:400;text-transform:none;letter-spacing:0">— watch it live, or push it to your pipeline</span></h2>
+      <div class="radio-row" id="deliveryPicker"></div>
+      <div class="row3" style="margin-top:14px">
+        <div><label>Format (record-oriented)</label>
+          <select id="strFormat">
+            <option value="ndjson">ndjson</option>
+            <option value="json">json</option>
+            <option value="csv">csv</option>
+          </select></div>
+        <div></div><div></div>
+      </div>
+      <div class="sink-fields" id="sinkFields"></div>
+      <p class="hint" id="deliveryHint"></p>
+    </section>
+
+    <section class="card">
+      <h2>Run limits <span style="font-weight:400;text-transform:none;letter-spacing:0">— every stream is bounded (safety)</span></h2>
+      <div class="row3">
+        <div><label>Max records *</label><input id="strMax" type="number" min="1" placeholder="e.g. 500"></div>
+        <div><label>Max seconds *</label><input id="strSecs" type="number" min="1" placeholder="e.g. 30"></div>
+        <div><label>Rate (records/sec, optional)</label><input id="strRate" type="number" min="0" placeholder="e.g. 5"></div>
+      </div>
+      <p class="hint">Both caps are required — whichever comes first ends the run. Hit a cap and chaff asks before running again, so nothing floods your pipeline unattended.</p>
+      <div class="actions" style="margin-top:10px">
+        <button class="btn" id="streamBtn">Start</button>
+        <button class="btn ghost" id="stopBtn" disabled>Stop</button>
+        <span class="pill" id="strStatus" style="display:none"><span class="dot"></span><span id="strStatusText"></span></span>
+        <span class="msg" id="strMsg"></span>
+      </div>
+      <div class="reconfirm" id="reconfirm">
+        <span id="reconfirmText"></span>
+        <span>
+          <button class="btn" id="againBtn">Run again</button>
+          <button class="btn ghost" id="dismissBtn">Done</button>
+        </span>
+      </div>
+      <pre id="feed" class="feed empty">Pick a destination and press Start.</pre>
+    </section>
+  </div>
 
   <footer style="text-align:center;color:var(--muted);font-size:12px;padding:4px 0 8px">
     chaff — MIT licensed · <a href="/licenses" target="_blank" style="color:var(--muted)">open-source licenses</a>
@@ -383,9 +442,9 @@ function loadSpecIntoForm(spec) {
   setMsg(`Loaded "${spec.name}"`, 'ok');
 }
 
-// Assemble a DatasetSpec from the form. The UI only builds specs (INV-1).
-function buildSpec() {
-  const cols = [...document.querySelectorAll('.col')].map(c => {
+// The columns table — shared by the Batch and Stream tabs (one spec, INV-1).
+function buildColumns() {
+  return [...document.querySelectorAll('.col')].map(c => {
     const name = c.querySelector('.c-name').value.trim();
     const generator = c.querySelector('.c-gen').value;
     const raw = c.querySelector('.c-params').value.trim();
@@ -401,17 +460,24 @@ function buildSpec() {
     const null_rate = parseFloat(c.querySelector('.c-null').value) || 0;
     return { name, generator, params, null_rate };
   }).filter(c => c.name);
+}
 
+// The shared dataset skeleton (name/rows/seed/columns); each tab supplies its
+// own output format and sink. The UI only builds specs (INV-1).
+function baseSpec(format) {
   const seedRaw = $('seed').value.trim();
   const spec = {
     name: $('name').value.trim() || 'dataset',
     rows: parseInt($('rows').value, 10) || 1,
-    columns: cols,
-    output: { format: $('format').value },
+    columns: buildColumns(),
+    output: { format },
   };
   if (seedRaw !== '') spec.seed = parseInt(seedRaw, 10);
   return spec;
 }
+
+// Batch spec: the chosen Output format, default (file) sink.
+function buildSpec() { return baseSpec($('format').value); }
 
 function setMsg(text, kind) { const m = $('msg'); m.textContent = text; m.className = 'msg ' + (kind || ''); }
 
@@ -531,85 +597,243 @@ async function doDraft() {
   m.className = 'msg ok'; m.textContent = 'Drafted — review and tweak below.';
 }
 
-// ── Live stream (serve over WebSocket) ───────────────────────────
-// chaff serves the spec below over /stream; records arrive frame-by-frame.
-// The spec's `sink` is irrelevant here — the socket is the delivery.
-let _ws = null;
+// ── Tabs ─────────────────────────────────────────────────────────
+function selectTab(paneId) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.pane === paneId));
+  document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('active', p.id === paneId));
+  if (paneId === 'paneStream') {  // prefill sensible, mandatory caps so Joe isn't blocked
+    if (!$('strMax').value) $('strMax').value = $('rows').value || 100;
+    if (!$('strSecs').value) $('strSecs').value = 30;
+  }
+}
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => selectTab(t.dataset.pane));
+
+// ── Stream tab: delivery targets ─────────────────────────────────
+// Model 1 (ws): the browser holds the socket, records stream into the page.
+// The rest: chaff (the server) pushes to your broker/endpoint as a bounded
+// background job. Field labels are static (safe as innerHTML); typed values
+// are read via .value, never interpolated into markup.
+const DELIVERY = {
+  ws:    { label: 'Live view (WebSocket)', fields: [] },
+  kafka: { label: 'Kafka', sink: 'kafka', fields: [
+    { k: 'topic', ph: 'topic', def: 'demo' },
+    { k: 'bootstrap_servers', ph: 'host:9092', def: 'localhost:9092' } ] },
+  mqtt:  { label: 'MQTT', sink: 'mqtt', fields: [
+    { k: 'topic', ph: 'demo/sensors', def: 'demo/sensors' },
+    { k: 'host', ph: 'localhost', def: 'localhost' },
+    { k: 'port', ph: '1883', def: '1883', num: true } ] },
+  http:  { label: 'HTTP POST', sink: 'http', fields: [
+    { k: 'url', ph: 'https://your-api/ingest', def: '' },
+    { k: 'batch_size', ph: '1', def: '1', num: true } ] },
+  tcp:   { label: 'TCP', sink: 'tcp', fields: [
+    { k: 'host', ph: '127.0.0.1', def: '127.0.0.1' },
+    { k: 'port', ph: '6000', def: '', num: true } ] },
+  udp:   { label: 'UDP', sink: 'udp', fields: [
+    { k: 'host', ph: '127.0.0.1', def: '127.0.0.1' },
+    { k: 'port', ph: '6000', def: '', num: true } ] },
+};
+const DELIVERY_HINT = {
+  ws: 'chaff serves records straight to this page over a WebSocket — no broker. Great for a demo.',
+  kafka: 'chaff produces one message per record to your Kafka topic. The server must reach the broker.',
+  mqtt: 'chaff publishes one message per record to your MQTT topic (host:port).',
+  http: 'chaff POSTs records (optionally batched) to your HTTP endpoint.',
+  tcp: 'chaff sends raw record bytes over a TCP socket to host:port.',
+  udp: 'chaff sends raw record datagrams to host:port (UDP; keep records small).',
+};
+let _delivery = 'ws';
+
+function renderDeliveryPicker() {
+  const box = $('deliveryPicker');
+  box.innerHTML = '';
+  Object.entries(DELIVERY).forEach(([key, d]) => {
+    const lab = document.createElement('label');
+    lab.className = key === _delivery ? 'sel' : '';
+    const radio = document.createElement('input');
+    radio.type = 'radio'; radio.name = 'delivery'; radio.value = key; radio.checked = key === _delivery;
+    radio.onchange = () => { _delivery = key; renderDeliveryPicker(); renderSinkFields(); };
+    lab.appendChild(radio);
+    lab.appendChild(document.createTextNode(d.label));
+    box.appendChild(lab);
+  });
+  $('deliveryHint').textContent = DELIVERY_HINT[_delivery] || '';
+}
+
+function renderSinkFields() {
+  const box = $('sinkFields');
+  box.innerHTML = '';
+  DELIVERY[_delivery].fields.forEach(f => {
+    const wrap = document.createElement('div');
+    const label = document.createElement('label');
+    label.textContent = f.k;
+    const inp = document.createElement('input');
+    inp.className = 'sink-opt'; inp.dataset.key = f.k;
+    if (f.num) inp.type = 'number';
+    inp.placeholder = f.ph; inp.value = f.def || '';
+    wrap.appendChild(label); wrap.appendChild(inp); box.appendChild(wrap);
+  });
+}
+
+// Live view returns null (the WS endpoint ignores the spec's sink — the socket
+// is the delivery); a push target returns {sink, options} from its fields.
+function buildSink() {
+  const d = DELIVERY[_delivery];
+  if (!d.sink) return null;
+  const options = {};
+  document.querySelectorAll('#sinkFields .sink-opt').forEach(inp => {
+    const v = inp.value.trim();
+    if (v === '') return;
+    options[inp.dataset.key] = inp.type === 'number' ? Number(v) : v;
+  });
+  return { sink: d.sink, options };
+}
+
+function buildStreamSpec() {
+  const spec = baseSpec($('strFormat').value);
+  const sink = buildSink();
+  if (sink) spec.sink = sink;
+  return spec;
+}
+
+// ── Stream run: shared caps + status + re-confirm ────────────────
+let _ws = null, _pollTimer = null, _jobId = null, _stopped = false;
+
 function setStrMsg(text, kind) { const m = $('strMsg'); m.textContent = text; m.className = 'msg ' + (kind || ''); }
+function setStatus(text, kind) {
+  const p = $('strStatus');
+  if (!text) { p.style.display = 'none'; return; }
+  p.style.display = ''; p.className = 'pill ' + (kind || ''); $('strStatusText').textContent = text;
+}
+function running(on) { $('streamBtn').disabled = on; $('stopBtn').disabled = !on; }
+function hideReconfirm() { $('reconfirm').classList.remove('show'); }
+function showReconfirm(text) { $('reconfirmText').textContent = text; $('reconfirm').classList.add('show'); }
 
-function streamUrl() {
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const p = new URLSearchParams();
-  const rate = $('strRate').value.trim(); if (rate) p.set('rate', rate);
-  const dur = $('strDuration').value.trim(); if (dur) p.set('duration', dur);
-  const max = $('strMax').value.trim(); if (max) p.set('max_records', max);
-  const qs = p.toString();
-  return `${proto}//${location.host}/stream${qs ? '?' + qs : ''}`;
+// Both caps are mandatory (the guardrail). Returns {max, secs, rate} or null.
+function readCaps() {
+  const max = parseInt($('strMax').value, 10);
+  const secs = parseFloat($('strSecs').value);
+  if (!max || max < 1) { setStrMsg('Set a Max records cap before streaming.', 'err'); return null; }
+  if (!secs || secs <= 0) { setStrMsg('Set a Max seconds cap before streaming.', 'err'); return null; }
+  const rateRaw = $('strRate').value.trim();
+  return { max, secs, rate: rateRaw ? Number(rateRaw) : null };
 }
 
-function stopStream() {
+// Tear down any in-flight run (closes the socket, stops a server job, halts polling).
+function teardownRun() {
   if (_ws) { const w = _ws; _ws = null; try { w.close(); } catch (e) {} }
-  $('streamBtn').disabled = false;
-  $('stopBtn').disabled = true;
+  if (_pollTimer) { clearTimeout(_pollTimer); _pollTimer = null; }
+  if (_jobId) { stopPushJob(_jobId); _jobId = null; }
 }
 
-function doStream() {
+function doStart() {
+  hideReconfirm();
+  const caps = readCaps();
+  if (!caps) return;
   let spec;
-  try { spec = buildSpec(); } catch (e) { return setStrMsg(e.message, 'err'); }
+  try { spec = buildStreamSpec(); } catch (e) { return setStrMsg(e.message, 'err'); }
   if (!spec.columns.length) return setStrMsg('Add at least one column.', 'err');
-  stopStream();  // close any prior stream first
+  teardownRun();
+  _stopped = false;
+  if (_delivery === 'ws') startWs(spec, caps);
+  else startPushJob(spec, caps);
+}
 
-  const feed = $('feed');
-  feed.className = 'feed'; feed.textContent = '';
-  let count = 0;
-  let ws;
-  try { ws = new WebSocket(streamUrl()); }
+function doStop() {
+  _stopped = true;
+  teardownRun();
+  running(false); setStatus('stopped'); setStrMsg('Stopped.', 'ok');
+}
+
+// Model 1 — WebSocket live view (browser-held).
+function startWs(spec, caps) {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const p = new URLSearchParams({ max_records: caps.max, duration: caps.secs });
+  if (caps.rate) p.set('rate', caps.rate);
+  const feed = $('feed'); feed.className = 'feed'; feed.textContent = '';
+  let count = 0, ws;
+  try { ws = new WebSocket(`${proto}//${location.host}/stream?${p}`); }
   catch (e) { return setStrMsg('Could not open stream: ' + e.message, 'err'); }
-  _ws = ws;
-  $('streamBtn').disabled = true; $('stopBtn').disabled = false;
-  setStrMsg('Connecting…');
-
-  ws.onopen = () => { ws.send(JSON.stringify(spec)); setStrMsg('Streaming…'); };
+  _ws = ws; running(true); setStatus('connecting…', 'run'); setStrMsg('');
+  ws.onopen = () => { ws.send(JSON.stringify(spec)); setStatus('streaming', 'run'); };
   ws.onmessage = (ev) => {
-    // Control/error frames ({"error": …}) only ever arrive before any record,
-    // so only sniff for them while the count is still zero — a data record is
-    // never misread as an error.
-    if (count === 0) {
-      try {
-        const o = JSON.parse(ev.data);
+    if (count === 0) {  // control/error frames only ever precede records
+      try { const o = JSON.parse(ev.data);
         if (o && typeof o === 'object' && !Array.isArray(o) && 'error' in o) {
-          return setStrMsg(o.error, 'err');
+          setStatus('error', 'err'); return setStrMsg(o.error, 'err');
         }
-      } catch (e) { /* not JSON — a plain record (csv line), fall through */ }
+      } catch (e) {}
     }
     count++;
-    // textContent append (never innerHTML) so record content can't inject markup.
-    feed.appendChild(document.createTextNode(ev.data + '\n'));
-    while (feed.childNodes.length > 500) feed.removeChild(feed.firstChild);  // cap DOM growth
-    feed.scrollTop = feed.scrollHeight;                                       // pin to newest
-    setStrMsg(count + ' records', 'ok');
+    feed.appendChild(document.createTextNode(ev.data + '\n'));  // textContent — never innerHTML
+    while (feed.childNodes.length > 500) feed.removeChild(feed.firstChild);
+    feed.scrollTop = feed.scrollHeight;
+    setStatus(count + ' sent', 'run');
   };
   ws.onclose = () => {
-    if (_ws === ws) {
-      _ws = null; $('streamBtn').disabled = false; $('stopBtn').disabled = true;
-      setStrMsg(count + ' records — stream ended', 'ok');
-    }
+    if (_ws !== ws && !_stopped) return;  // superseded by a newer stream
+    _ws = null; running(false);
+    if (_stopped) setStatus('stopped');
+    else if (count > 0) {  // socket closed on its own -> hit a cap. Re-confirm.
+      setStatus(count + ' sent · ended');
+      showReconfirm(`Streamed ${count} record(s), hit your limit. Run again?`);
+    } else setStatus('ended');  // 0 records -> an error was already shown
   };
-  ws.onerror = () => setStrMsg('Stream error — is the server reachable?', 'err');
+  ws.onerror = () => { setStatus('error', 'err'); setStrMsg('Stream error — is the server reachable?', 'err'); };
 }
 
+// Model 2 — push job (server-side; Start/Status/Stop over REST).
+function startPushJob(spec, caps) {
+  const feed = $('feed'); feed.className = 'feed';
+  feed.textContent = `streaming to ${DELIVERY[_delivery].label}…\n`;
+  running(true); setStatus('starting…', 'run'); setStrMsg('');
+  fetch('/stream/jobs', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ spec, max_records: caps.max, max_seconds: caps.secs, rate: caps.rate }),
+  }).then(async r => {
+    if (!r.ok) { running(false); setStatus('error', 'err'); return setStrMsg(await apiError(r), 'err'); }
+    const job = await r.json();
+    _jobId = job.id;
+    pollJob(job.id);
+  }).catch(e => { running(false); setStatus('error', 'err'); setStrMsg(String(e), 'err'); });
+}
+
+function pollJob(id) {
+  fetch('/stream/jobs/' + id).then(r => r.json()).then(job => {
+    if (_jobId !== id) return;  // superseded / stopped
+    setStatus(`${job.sent} sent · ${job.elapsed}s`, job.status === 'error' ? 'err' : 'run');
+    if (job.status === 'running') { _pollTimer = setTimeout(() => pollJob(id), 400); return; }
+    running(false); _jobId = null;
+    $('feed').appendChild(document.createTextNode((job.receipt || job.error || '') + '\n'));
+    if (job.status === 'error') { setStatus('error', 'err'); setStrMsg(job.error || 'job failed', 'err'); }
+    else if (job.status === 'stopped') { setStatus('stopped'); setStrMsg(`Stopped after ${job.sent} record(s).`, 'ok'); }
+    else {
+      setStatus(`done · ${job.sent} sent`);
+      if (job.hit_limit) showReconfirm(
+        `Sent ${job.sent} record(s) to ${job.destination} in ${job.elapsed}s — hit your ` +
+        `${job.ended_reason === 'duration' ? 'time' : 'record'} cap. Run again?`);
+      else setStrMsg(`Sent ${job.sent} record(s).`, 'ok');
+    }
+  }).catch(e => { running(false); setStatus('error', 'err'); setStrMsg(String(e), 'err'); });
+}
+
+function stopPushJob(id) { fetch('/stream/jobs/' + id, { method: 'DELETE' }).catch(() => {}); }
+
+// ── Wiring ───────────────────────────────────────────────────────
 $('addCol').onclick = () => addColumn();
 $('previewBtn').onclick = doPreview;
 $('downloadBtn').onclick = doDownload;
 $('saveBtn').onclick = saveToLibrary;
 $('draftBtn').onclick = doDraft;
-$('streamBtn').onclick = doStream;
-$('stopBtn').onclick = () => { stopStream(); setStrMsg('Stopped', 'ok'); };
+$('streamBtn').onclick = doStart;
+$('stopBtn').onclick = doStop;
+$('againBtn').onclick = () => { hideReconfirm(); doStart(); };
+$('dismissBtn').onclick = hideReconfirm;
 $('nlKey').onchange = saveKey;
 $('nlProvider').onchange = saveKey;
 loadKey();
 loadRegistry();
 refreshLibrary();
+renderDeliveryPicker();
+renderSinkFields();
 </script>
 </body>
 </html>
