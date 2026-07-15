@@ -113,8 +113,10 @@ adds continuous/serve semantics and new transports.
       broker. Async pacing (never blocks the loop), run-mode via query params
       (`rate`/`duration`/`max_records`) mirroring the streaming sink options.
       Whole-file formats + multi-table specs are refused up front.
-- [ ] UI live-feed view: a "watch it stream" panel that opens the socket and
-      shows records arriving (the D4O payoff — office Joe sees it move).
+- [x] UI live-feed view: a "Live stream" panel that opens the socket and
+      shows records arriving with a running count (the D4O payoff — office Joe
+      sees it move). Rate/duration/max controls; record content appended as
+      text nodes, never innerHTML (XSS-safe). Verified in a real browser.
 - [x] **MQTT publish sink:** `@stream_sink("mqtt")` (paho-mqtt under the
       `streaming` extra), same shape as kafka — publish per record to a topic,
       qos 0/1/2, secrets from options/env (never logged), fail loud on
