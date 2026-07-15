@@ -252,6 +252,55 @@ async def stream(websocket: WebSocket):
     await websocket.close()  # closing the socket marks end-of-stream
 
 
+# ── Streaming jobs: push to a broker/endpoint, bounded + stoppable ───
+# Model 2 of the Stream tab (ADR-0017): the browser can't hold a Kafka/MQTT
+# connection, so the server runs the push as a background job the UI drives
+# via Start / Status / Stop. Every job is capped (records AND seconds) under a
+# hard ceiling — the guardrail. WebSocket "live view" (Model 1, /stream above)
+# stays browser-held; this is only for the push sinks.
+
+class StreamJobRequest(BaseModel):
+    spec: DatasetSpec
+    max_records: int    # required cap (guardrail) — server-clamped to a ceiling
+    max_seconds: float  # required cap (guardrail) — server-clamped to a ceiling
+    rate: Optional[float] = None  # records/sec pacing; None = as fast as the sink drains
+
+
+@app.post("/stream/jobs")
+def stream_job_start(req: StreamJobRequest):
+    from . import stream_jobs
+    try:
+        job = stream_jobs.start_job(req.spec, max_records=req.max_records,
+                                    max_seconds=req.max_seconds, rate=req.rate)
+    except stream_jobs.StreamJobError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return job.public()
+
+
+@app.get("/stream/jobs")
+def stream_jobs_list():
+    from . import stream_jobs
+    return {"jobs": stream_jobs.list_jobs()}
+
+
+@app.get("/stream/jobs/{job_id}")
+def stream_job_status(job_id: str):
+    from . import stream_jobs
+    try:
+        return stream_jobs.get_job(job_id).public()
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"no such stream job '{job_id}'")
+
+
+@app.delete("/stream/jobs/{job_id}")
+def stream_job_stop(job_id: str):
+    from . import stream_jobs
+    try:
+        return stream_jobs.stop_job(job_id).public()
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"no such stream job '{job_id}'")
+
+
 # ── Spec library (presets + saved schemas) ──────────────────────────
 
 @app.get("/library")

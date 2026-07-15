@@ -251,6 +251,37 @@ def effective_row_count(spec: DatasetSpec) -> int:
     return spec.rows
 
 
+def resolve_stream_limit(max_records: int | None, duration: float | None) -> float | int | None:
+    """Records to generate for a stream. An explicit `max_records` wins; a
+    `duration` with no record cap means unbounded (the clock cuts it); else
+    `None` = the spec's natural length. Shared by `run()` and the API job
+    runner so the bound is resolved the same way everywhere."""
+    return math.inf if (max_records is None and duration) else max_records
+
+
+def stream_encoded(
+    spec: DatasetSpec,
+    *,
+    limit: float | int | None = None,
+    rate: float | None = None,
+    duration: float | None = None,
+) -> Iterator[bytes]:
+    """Encode + pace + time-bound a streaming spec's records, minus delivery.
+
+    The one assembly behind both `run()`'s streaming branch and the API job
+    runner, so encoding, pacing, and bounds never drift between them. Returns
+    an iterator of encoded record-bytes for a streaming sink to deliver.
+    `get_record_encoder` is resolved eagerly, so a whole-file format fails
+    fast here — before any sink or network is touched (INV-2 stays intact:
+    the engine encodes; the sink only delivers)."""
+    rec_enc = get_record_encoder(spec.output.format)
+    records = (rec_enc(spec, r) for r in iter_records(spec, limit=limit))
+    paced = rate_limited(records, rate)
+    if duration:
+        paced = time_limited(paced, float(duration))
+    return paced
+
+
 # Fun clause (AGENTS.md §5): seed 8675309 tips its hat to Jenny. Receipt
 # only — the payload bytes are untouched, so seed determinism is unharmed.
 _JENNY = 8675309
@@ -273,18 +304,15 @@ def run(spec: DatasetSpec) -> str:
     if is_stream_sink(sink_id):
         # Lazy path (ADR-0016): records are generated one at a time as the
         # sink consumes them, so a stream can run past memory or run forever.
-        rec_enc = get_record_encoder(spec.output.format)  # fail fast before the network
         opts = spec.sink.options
-        max_records = opts.get("max_records")
         duration = opts.get("duration")
-        # A duration bound with no explicit record cap means "stream until the
-        # clock runs out" — generate unbounded and let time_limited do the cut.
-        limit = math.inf if (max_records is None and duration) else max_records
-        records = (rec_enc(spec, r) for r in iter_records(spec, limit=limit))
-        paced = rate_limited(records, opts.get("rate"))
-        if duration:
-            paced = time_limited(paced, float(duration))
-        receipt = get_stream_sink(sink_id)(spec, paced)
+        stream = stream_encoded(
+            spec,
+            limit=resolve_stream_limit(opts.get("max_records"), duration),
+            rate=opts.get("rate"),
+            duration=duration,
+        )
+        receipt = get_stream_sink(sink_id)(spec, stream)
     else:
         rows = generate_records(spec)  # single-table or entity ticks
         payload = get_encoder(spec.output.format)(spec, rows)
