@@ -29,9 +29,12 @@ from chaff.formats import get_record_encoder
 from chaff.sinks import get_stream_sink, is_stream_sink
 from chaff.spec import DatasetSpec
 
+from .netpolicy import DestinationBlocked, check_destination
+
 
 class StreamJobError(ValueError):
-    """A bad job request: unstreamable sink/format, or a missing/oversized cap."""
+    """A bad job request: unstreamable sink/format, a missing/oversized cap, or
+    a destination egress policy forbids (SSRF guard, ADR-0018)."""
 
 
 def _ceiling_records() -> int:
@@ -122,6 +125,13 @@ def start_job(spec: DatasetSpec, *, max_records, max_seconds, rate=None) -> Stre
     try:
         get_record_encoder(spec.output.format)  # whole-file formats can't stream; fail fast
     except KeyError as e:
+        raise StreamJobError(str(e)) from None
+
+    # SSRF guard (ADR-0018): vet the destination before a thread/socket exists,
+    # so a blocked host is a clean 422 and never a launched job.
+    try:
+        check_destination(spec)
+    except DestinationBlocked as e:
         raise StreamJobError(str(e)) from None
 
     max_records = int(_require_cap(max_records, _ceiling_records(), "max_records"))

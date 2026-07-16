@@ -174,9 +174,20 @@ def iter_entity_rows(spec: DatasetSpec, *, limit: float | int | None = None) -> 
     state_cols = [(col, get_generator(col.generator)) for col in spec.columns]
     updates = [(get_updater(u.updater), u.params) for u in ent.updates]  # fail fast
 
+    # Only materialize as many entities as the cap can ever emit. Tick 0 emits
+    # entities in order, so when `limit` is smaller than `count` the run ends
+    # inside tick 0 — before any per-tick update — and the entities past the
+    # cap are never observed. Skipping them keeps output byte-identical (INV-3,
+    # the rng is consumed identically for the entities that *are* emitted) while
+    # stopping one WS message with count=1_000_000 + max_records=1 from
+    # materializing a million entities up front and blocking the event loop.
+    n_entities = ent.count
+    if limit is not None and limit < ent.count:
+        n_entities = int(limit)
+
     ids: list[Any] = []
     states: list[dict[str, Any]] = []
-    for e in range(ent.count):
+    for e in range(n_entities):
         state: dict[str, Any] = {}
         cache: dict[str, Any] = {}
         # ctx.row is the entity's initial-state dict, so a `derived` column can
@@ -201,11 +212,11 @@ def iter_entity_rows(spec: DatasetSpec, *, limit: float | int | None = None) -> 
     t = 0
     while emitted < cap:
         if t > 0:
-            for e in range(ent.count):
+            for e in range(n_entities):
                 ectx = EntityContext(rng=rng, faker=faker, entity_index=e, tick=t)
                 for upd_fn, params in updates:
                     upd_fn(ectx, states[e], params)
-        for e in range(ent.count):
+        for e in range(n_entities):
             if emitted >= cap:
                 break
             row = {ent.id_column: ids[e], ent.tick_column: t}
