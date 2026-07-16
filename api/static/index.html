@@ -211,6 +211,7 @@
         <div><label>Rate (records/sec, optional)</label><input id="strRate" type="number" min="0" placeholder="e.g. 5"></div>
       </div>
       <p class="hint">Both caps are required — whichever comes first ends the run. Hit a cap and chaff asks before running again, so nothing floods your pipeline unattended.</p>
+      <div style="margin-top:6px"><label>Access token <span style="font-weight:400;text-transform:none;letter-spacing:0">— only needed if this server sets CHAFF_API_TOKEN (leave blank for a local server)</span></label><input id="strToken" type="password" placeholder="blank for local"></div>
       <div class="actions" style="margin-top:10px">
         <button class="btn" id="streamBtn">Start</button>
         <button class="btn ghost" id="stopBtn" disabled>Stop</button>
@@ -697,6 +698,20 @@ function buildStreamSpec() {
 // ── Stream run: shared caps + status + re-confirm ────────────────
 let _ws = null, _pollTimer = null, _jobId = null, _stopped = false;
 
+// Optional access token: only meaningful when the server sets CHAFF_API_TOKEN
+// (network-exposed deployments). Blank on a local server = unchanged. Persisted
+// so it survives reloads; sent as a header on REST and a query param on the WS.
+function streamToken() { return ($('strToken')?.value || '').trim(); }
+function tokenHeaders(base) {
+  const t = streamToken();
+  return t ? { ...base, 'X-Chaff-Token': t } : base;
+}
+function tokenParam(params) {
+  const t = streamToken();
+  if (t) params.set('token', t);
+  return params;
+}
+
 function setStrMsg(text, kind) { const m = $('strMsg'); m.textContent = text; m.className = 'msg ' + (kind || ''); }
 function setStatus(text, kind) {
   const p = $('strStatus');
@@ -748,6 +763,7 @@ function startWs(spec, caps) {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const p = new URLSearchParams({ max_records: caps.max, duration: caps.secs });
   if (caps.rate) p.set('rate', caps.rate);
+  tokenParam(p);
   const feed = $('feed'); feed.className = 'feed'; feed.textContent = '';
   let count = 0, ws;
   try { ws = new WebSocket(`${proto}//${location.host}/stream?${p}`); }
@@ -786,7 +802,7 @@ function startPushJob(spec, caps) {
   feed.textContent = `streaming to ${DELIVERY[_delivery].label}…\n`;
   running(true); setStatus('starting…', 'run'); setStrMsg('');
   fetch('/stream/jobs', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: tokenHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ spec, max_records: caps.max, max_seconds: caps.secs, rate: caps.rate }),
   }).then(async r => {
     if (!r.ok) { running(false); setStatus('error', 'err'); return setStrMsg(await apiError(r), 'err'); }
@@ -797,7 +813,7 @@ function startPushJob(spec, caps) {
 }
 
 function pollJob(id) {
-  fetch('/stream/jobs/' + id).then(r => r.json()).then(job => {
+  fetch('/stream/jobs/' + id, { headers: tokenHeaders({}) }).then(r => r.json()).then(job => {
     if (_jobId !== id) return;  // superseded / stopped
     setStatus(`${job.sent} sent · ${job.elapsed}s`, job.status === 'error' ? 'err' : 'run');
     if (job.status === 'running') { _pollTimer = setTimeout(() => pollJob(id), 400); return; }
@@ -815,7 +831,7 @@ function pollJob(id) {
   }).catch(e => { running(false); setStatus('error', 'err'); setStrMsg(String(e), 'err'); });
 }
 
-function stopPushJob(id) { fetch('/stream/jobs/' + id, { method: 'DELETE' }).catch(() => {}); }
+function stopPushJob(id) { fetch('/stream/jobs/' + id, { method: 'DELETE', headers: tokenHeaders({}) }).catch(() => {}); }
 
 // ── Wiring ───────────────────────────────────────────────────────
 $('addCol').onclick = () => addColumn();
@@ -829,6 +845,9 @@ $('againBtn').onclick = () => { hideReconfirm(); doStart(); };
 $('dismissBtn').onclick = hideReconfirm;
 $('nlKey').onchange = saveKey;
 $('nlProvider').onchange = saveKey;
+// Access token persists in this browser only (like the NL key above).
+$('strToken').value = localStorage.getItem('chaff_stream_token') || '';
+$('strToken').onchange = () => localStorage.setItem('chaff_stream_token', streamToken());
 loadKey();
 loadRegistry();
 refreshLibrary();

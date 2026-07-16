@@ -10,17 +10,18 @@ from __future__ import annotations
 import asyncio
 import html
 import json
-import math
 import os
 import sys
 import time
 from pathlib import Path
 from typing import Iterator, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
+
+from . import auth
 
 from chaff import __version__, library
 from chaff.engine import effective_row_count, generate_records, iter_records
@@ -173,35 +174,61 @@ def generate(spec: DatasetSpec):
 STREAM_DEFAULT_CAP = 10_000  # a plain connect (no bound) serves at most this
 
 
-def _q_float(value: Optional[str]) -> Optional[float]:
-    try:
-        return float(value) if value not in (None, "") else None
-    except ValueError:
-        return None
+def _stream_ceilings() -> tuple[int, float]:
+    """The hard server ceilings the push-job runner enforces, reused here so
+    the WS serve path is bounded by the *same* guardrail (ADR-0017/0018)."""
+    from . import stream_jobs
+    return stream_jobs._ceiling_records(), stream_jobs._ceiling_seconds()
 
 
-def _q_int(value: Optional[str]) -> Optional[int]:
-    try:
-        return int(value) if value not in (None, "") else None
-    except ValueError:
+def _q_positive(qp, key: str, cast, label: str):
+    """Parse a positive query param, or None if absent. A present-but-invalid
+    value is an error, never a silent fall-through to 'unbounded' (that
+    degrade-to-unlimited was its own finding)."""
+    raw = qp.get(key)
+    if raw in (None, ""):
         return None
+    try:
+        val = cast(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"invalid '{key}': {raw!r} is not a valid {label}")
+    if val <= 0:
+        raise ValueError(f"invalid '{key}': must be a positive {label}")
+    return val
+
+
+def _parse_stream_params(qp) -> tuple[Optional[float], Optional[float], Optional[int]]:
+    """(rate, duration, max_records) from the WS query string. Raises ValueError
+    on any present-but-malformed value so the handler can reject it explicitly."""
+    return (
+        _q_positive(qp, "rate", float, "number"),
+        _q_positive(qp, "duration", float, "number"),
+        _q_positive(qp, "max_records", int, "integer"),
+    )
 
 
 def _resolve_stream_limit(spec: DatasetSpec, max_records: Optional[int],
-                          duration: Optional[float]) -> float | int:
-    """How many records to serve. Explicit `max_records` wins; a `duration`
-    with no cap streams unbounded (the clock cuts it); otherwise serve the
-    spec's natural length, capped so a plain connect can't run away."""
+                          duration: Optional[float], rec_ceiling: int) -> float | int:
+    """How many records to serve, always under the server's record ceiling.
+    Explicit `max_records` wins (clamped); a `duration` with no record cap
+    serves up to the ceiling (the clock usually cuts it first); otherwise serve
+    the spec's natural length, capped so a plain connect can't run away."""
     if max_records is not None:
-        return max_records
+        return min(max_records, rec_ceiling)
     if duration is not None:
-        return math.inf
+        return rec_ceiling
     return min(effective_row_count(spec), STREAM_DEFAULT_CAP)
 
 
 @app.websocket("/stream")
 async def stream(websocket: WebSocket):
     await websocket.accept()
+    # Auth gate (ADR-0018): a no-op unless CHAFF_API_TOKEN is set. Checked after
+    # accept so we can hand the client a readable error frame, not a bare close.
+    if not auth.ws_token_ok(websocket):
+        await websocket.send_json({"error": "missing or invalid API token"})
+        await websocket.close(code=1008)  # policy violation
+        return
     try:
         raw = await websocket.receive_text()
     except WebSocketDisconnect:
@@ -227,11 +254,19 @@ async def stream(websocket: WebSocket):
         await websocket.close()
         return
 
-    qp = websocket.query_params
-    rate = _q_float(qp.get("rate"))
-    duration = _q_float(qp.get("duration"))
-    max_records = _q_int(qp.get("max_records"))
-    limit = _resolve_stream_limit(spec, max_records, duration)
+    try:
+        rate, duration, max_records = _parse_stream_params(websocket.query_params)
+    except ValueError as e:
+        await websocket.send_json({"error": str(e)})
+        await websocket.close()
+        return
+
+    rec_ceiling, sec_ceiling = _stream_ceilings()
+    limit = _resolve_stream_limit(spec, max_records, duration, rec_ceiling)
+    # Always bound the socket by the seconds ceiling — even a client that sent
+    # no `duration` gets cut at the ceiling, so one held-open connection can't
+    # stream to the record cap unattended (the WS had no time bound before).
+    duration = min(duration, sec_ceiling) if duration else sec_ceiling
     interval = 1.0 / rate if rate and rate > 0 else 0.0
 
     start = time.monotonic()
@@ -266,7 +301,7 @@ class StreamJobRequest(BaseModel):
     rate: Optional[float] = None  # records/sec pacing; None = as fast as the sink drains
 
 
-@app.post("/stream/jobs")
+@app.post("/stream/jobs", dependencies=[Depends(auth.require_token)])
 def stream_job_start(req: StreamJobRequest):
     from . import stream_jobs
     try:
@@ -277,13 +312,13 @@ def stream_job_start(req: StreamJobRequest):
     return job.public()
 
 
-@app.get("/stream/jobs")
+@app.get("/stream/jobs", dependencies=[Depends(auth.require_token)])
 def stream_jobs_list():
     from . import stream_jobs
     return {"jobs": stream_jobs.list_jobs()}
 
 
-@app.get("/stream/jobs/{job_id}")
+@app.get("/stream/jobs/{job_id}", dependencies=[Depends(auth.require_token)])
 def stream_job_status(job_id: str):
     from . import stream_jobs
     try:
@@ -292,7 +327,7 @@ def stream_job_status(job_id: str):
         raise HTTPException(status_code=404, detail=f"no such stream job '{job_id}'")
 
 
-@app.delete("/stream/jobs/{job_id}")
+@app.delete("/stream/jobs/{job_id}", dependencies=[Depends(auth.require_token)])
 def stream_job_stop(job_id: str):
     from . import stream_jobs
     try:

@@ -127,6 +127,14 @@ docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink
   again — no runaway feeds. Generation is lazy and can run past the row count;
   determinism holds per-record: the i-th record is always the same, whatever
   the stream's length.
+- **Exposing chaff beyond localhost?** (ADR-0018) chaff's defaults assume a
+  single operator on localhost. The streaming surface is safe to put on a
+  network once you set two knobs: `CHAFF_API_TOKEN` requires a shared token on
+  `/stream/jobs` and the `/stream` WebSocket (paste it into the UI's **Access
+  token** field), and `CHAFF_STREAM_ALLOWED_HOSTS` restricts where push jobs may
+  connect. Cloud-metadata / link-local addresses (169.254.x, the SSRF classic)
+  are **always** blocked, no config needed. Left unset, everything behaves as
+  the zero-config local demo it's always been.
 - **Semantic generators** (ADR-0003): "full_name", "pattern: ABC-####-?????",
   "70% Open / 20% Pending / 10% Closed" — not VARCHARs. Includes real-world
   **distributions** (lognormal, exponential, poisson, power_law),

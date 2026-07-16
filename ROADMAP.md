@@ -129,6 +129,14 @@ adds continuous/serve semantics and new transports.
       cap re-confirms ("run again?") so nothing floods a pipeline unattended.
       `streaming` extra baked into the default image. Verified in a real browser
       (both models, TCP round-trip). Closes the job-queue TODO from ADR-0007.
+- [x] **Harden the network-facing streaming surface (ADR-0018):** opt-in
+      `CHAFF_API_TOKEN` gates `/stream/jobs*` + the `/stream` WS; an egress
+      policy blocks cloud-metadata/link-local always and honors an opt-in
+      `CHAFF_STREAM_ALLOWED_HOSTS` allowlist (SSRF); the WS now applies the same
+      record/second ceilings as the job runner (and errors on bad params instead
+      of streaming unbounded); entity materialization is bounded by the cap so a
+      tiny `max_records` over a huge `entity.count` can't freeze the loop.
+      Defaults keep the localhost demo zero-config.
 
 ### Deferred (weird outliers — seams noted, not built)
 - gRPC server-streaming RPC: the enterprise-grade serve option (backpressure,
