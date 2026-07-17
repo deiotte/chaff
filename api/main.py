@@ -172,6 +172,34 @@ def generate(spec: DatasetSpec):
 # same spec streams the same way to a socket or a broker.
 
 STREAM_DEFAULT_CAP = 10_000  # a plain connect (no bound) serves at most this
+STREAM_HANDSHAKE_TIMEOUT = 10.0  # seconds to wait for the opening spec frame
+STREAM_MAX_SESSIONS = 64  # concurrent /stream sockets one process will hold
+
+# Live /stream sockets currently in flight. The WS handlers are coroutines on
+# the single event loop, so a plain int is safe here: the capacity check and
+# the increment run back-to-back with no `await` between them, so no two
+# admissions can interleave. (Push jobs run in threads and are counted
+# separately by stream_jobs — this is only the browser-held sockets.)
+_active_ws_sessions = 0
+
+
+def _handshake_timeout() -> float:
+    """Seconds to wait for the client's opening spec frame before dropping an
+    idle socket (ADR-0019). Override with CHAFF_STREAM_HANDSHAKE_TIMEOUT."""
+    try:
+        return float(os.environ.get(
+            "CHAFF_STREAM_HANDSHAKE_TIMEOUT", STREAM_HANDSHAKE_TIMEOUT))
+    except ValueError:
+        return STREAM_HANDSHAKE_TIMEOUT
+
+
+def _max_ws_sessions() -> int:
+    """How many live /stream sockets one process will hold at once (ADR-0019).
+    Override with CHAFF_STREAM_MAX_SESSIONS."""
+    try:
+        return int(os.environ.get("CHAFF_STREAM_MAX_SESSIONS", STREAM_MAX_SESSIONS))
+    except ValueError:
+        return STREAM_MAX_SESSIONS
 
 
 def _stream_ceilings() -> tuple[int, float]:
@@ -222,6 +250,7 @@ def _resolve_stream_limit(spec: DatasetSpec, max_records: Optional[int],
 
 @app.websocket("/stream")
 async def stream(websocket: WebSocket):
+    global _active_ws_sessions
     await websocket.accept()
     # Auth gate (ADR-0018): a no-op unless CHAFF_API_TOKEN is set. Checked after
     # accept so we can hand the client a readable error frame, not a bare close.
@@ -229,8 +258,37 @@ async def stream(websocket: WebSocket):
         await websocket.send_json({"error": "missing or invalid API token"})
         await websocket.close(code=1008)  # policy violation
         return
+
+    # Concurrency ceiling (ADR-0019): cap how many live sockets one process
+    # holds so a flood of connections can't exhaust the single-process server.
+    # Counted only for admitted sessions and released in `finally` below on every
+    # exit path (handshake timeout, bad spec, disconnect, or clean end-of-stream).
+    if _active_ws_sessions >= _max_ws_sessions():
+        await websocket.send_json(
+            {"error": "server is at its live-stream capacity; try again shortly"})
+        await websocket.close(code=1013)  # try again later
+        return
+    _active_ws_sessions += 1
     try:
-        raw = await websocket.receive_text()
+        await _serve_stream(websocket)
+    finally:
+        _active_ws_sessions -= 1
+
+
+async def _serve_stream(websocket: WebSocket) -> None:
+    # Opening handshake (ADR-0019): wait only a bounded time for the client's
+    # spec frame. Without this, an idle socket that connects and never sends a
+    # spec is held open forever — and with auth off by default and the Docker
+    # image bound to 0.0.0.0, that is an *unauthenticated* connection-exhaustion
+    # DoS on the exact surface ADR-0018 set out to harden.
+    try:
+        raw = await asyncio.wait_for(
+            websocket.receive_text(), timeout=_handshake_timeout())
+    except asyncio.TimeoutError:
+        await websocket.send_json(
+            {"error": "timed out waiting for the opening spec frame"})
+        await websocket.close(code=1008)  # policy violation
+        return
     except WebSocketDisconnect:
         return
 

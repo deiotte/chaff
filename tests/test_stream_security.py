@@ -1,4 +1,4 @@
-"""Security hardening for the streaming surface (ADR-0018).
+"""Security hardening for the streaming surface (ADR-0018, follow-up ADR-0019).
 
 Covers the four findings against PRs #27/#28:
   #1/#2  opt-in CHAFF_API_TOKEN gates /stream/jobs* and the /stream WS
@@ -7,6 +7,11 @@ Covers the four findings against PRs #27/#28:
   #3     the /stream WS applies the server record/second ceilings
   #4     entity materialization is bounded by the cap (no 1M-entity freeze)
   LOW    invalid WS query params error instead of silently going unlimited
+
+ADR-0019 closes the WS connection-exhaustion DoS left open by ADR-0018:
+  C-1    the /stream WS bounds the wait for the opening spec frame, so an idle
+         socket can't be held open forever (CHAFF_STREAM_HANDSHAKE_TIMEOUT)
+  C-3    the /stream WS caps concurrent live sockets (CHAFF_STREAM_MAX_SESSIONS)
 """
 
 import itertools
@@ -244,3 +249,49 @@ def test_entity_limit_spanning_ticks_materializes_all_entities(monkeypatch):
     rows = list(iter_records(spec, limit=10))
     assert calls["n"] == 4
     assert [r["tick"] for r in rows] == [0, 0, 0, 0, 1, 1, 1, 1, 2, 2]
+
+
+# ── C-1: the /stream WS bounds the opening-frame wait (ADR-0019) ──────
+
+def test_ws_handshake_timeout_drops_idle_socket(monkeypatch):
+    # A client that connects and never sends a spec used to hold the socket
+    # open forever (auth is off by default). Now it's dropped after the
+    # handshake window with a readable error frame — no more slow-loris hold.
+    monkeypatch.setenv("CHAFF_STREAM_HANDSHAKE_TIMEOUT", "0.2")
+    with client.websocket_connect("/stream") as ws:
+        body = ws.receive_json()  # server closes after the window; don't send
+    assert "error" in body and "timed out" in body["error"]
+
+
+def test_ws_prompt_client_is_not_dropped_by_handshake_timeout(monkeypatch):
+    # A client that sends its spec promptly streams normally even under a tight
+    # handshake window — the timeout only bites idle sockets, never real ones.
+    monkeypatch.setenv("CHAFF_STREAM_HANDSHAKE_TIMEOUT", "0.2")
+    with client.websocket_connect("/stream?max_records=2") as ws:
+        ws.send_text(json.dumps(_stream_spec()))
+        assert len(_drain_ws(ws)) == 2
+
+
+# ── C-3: the /stream WS caps concurrent live sockets (ADR-0019) ──────
+
+def test_ws_session_cap_rejects_when_full(monkeypatch):
+    # Simulate the process already holding its only slot; the next connect is
+    # turned away with a capacity error instead of piling on unbounded sockets.
+    import api.main as main
+    monkeypatch.setenv("CHAFF_STREAM_MAX_SESSIONS", "1")
+    monkeypatch.setattr(main, "_active_ws_sessions", 1)
+    with client.websocket_connect("/stream") as ws:
+        body = ws.receive_json()
+    assert "error" in body and "capacity" in body["error"]
+
+
+def test_ws_admitted_session_is_released(monkeypatch):
+    # An admitted session must free its slot on clean end-of-stream, or the cap
+    # would leak toward zero available. Drive a bounded stream to completion and
+    # confirm the live-session count is back to baseline.
+    import api.main as main
+    baseline = main._active_ws_sessions
+    with client.websocket_connect("/stream?max_records=2") as ws:
+        ws.send_text(json.dumps(_stream_spec()))
+        _drain_ws(ws)
+    assert main._active_ws_sessions == baseline

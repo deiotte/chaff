@@ -133,7 +133,11 @@ docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink
   `/stream/jobs` and the `/stream` WebSocket (paste it into the UI's **Access
   token** field), and `CHAFF_STREAM_ALLOWED_HOSTS` restricts where push jobs may
   connect. Cloud-metadata / link-local addresses (169.254.x, the SSRF classic)
-  are **always** blocked, no config needed. Left unset, everything behaves as
+  are **always** blocked, no config needed. The `/stream` socket is also bounded
+  against connection-exhaustion out of the box (ADR-0019): an idle client that
+  never sends a spec is dropped after a short handshake window, and concurrent
+  live sockets are capped — tune with `CHAFF_STREAM_HANDSHAKE_TIMEOUT` and
+  `CHAFF_STREAM_MAX_SESSIONS` if you expose it. Left unset, everything behaves as
   the zero-config local demo it's always been.
 - **Semantic generators** (ADR-0003): "full_name", "pattern: ABC-####-?????",
   "70% Open / 20% Pending / 10% Closed" — not VARCHARs. Includes real-world
