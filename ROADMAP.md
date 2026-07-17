@@ -137,6 +137,16 @@ adds continuous/serve semantics and new transports.
       of streaming unbounded); entity materialization is bounded by the cap so a
       tiny `max_records` over a huge `entity.count` can't freeze the loop.
       Defaults keep the localhost demo zero-config.
+- [x] **Close the `/stream` connection-exhaustion DoS (ADR-0019):** the
+      ADR-0018 record/second ceilings only bound a socket *after* a spec
+      arrives. Re-verification found two holes on the same class: the opening
+      `receive_text()` had no timeout (an idle unauthenticated socket held open
+      forever — the default config binds `0.0.0.0` with auth off), and nothing
+      capped concurrent live sockets. Now the handshake wait is bounded
+      (`CHAFF_STREAM_HANDSHAKE_TIMEOUT`, default 10s) and concurrent `/stream`
+      sockets are ceilinged (`CHAFF_STREAM_MAX_SESSIONS`, default 64), both
+      env-tunable, defaults leaving the localhost demo unchanged. Residuals
+      (WS-token-in-query, DNS-rebinding) re-verified and documented in the ADR.
 
 ### Deferred (weird outliers — seams noted, not built)
 - gRPC server-streaming RPC: the enterprise-grade serve option (backpressure,
