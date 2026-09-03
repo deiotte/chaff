@@ -65,10 +65,12 @@ docker compose up --build          # first run downloads + builds; give it a min
 
 Then open **http://localhost:8000** in your browser. You'll see a form.
 
-> chaff binds to `localhost` only, so nothing else on your network can reach
-> it. That's deliberate: the generation routes have no authentication yet. To
+> chaff binds to `localhost` only, and serves localhost without a token. To
 > expose it on purpose, set `CHAFF_BIND=0.0.0.0` **and** `CHAFF_API_TOKEN` in
-> `.env` — see [ADR-0024](docs/adr/0024-deployment-fails-closed.md).
+> `.env`; the token is then required on every route (paste it into the
+> **Access token** box in the page header). See
+> [ADR-0024](docs/adr/0024-deployment-fails-closed.md) and
+> [ADR-0025](docs/adr/0025-auth-on-every-route.md).
 
 1. Click any card in **Library** (e.g. *crm_contacts*) to load a ready-made dataset.
 2. Click **Preview** to see sample rows.
@@ -156,13 +158,16 @@ docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink
   again — no runaway feeds. Generation is lazy and can run past the row count;
   determinism holds per-record: the i-th record is always the same, whatever
   the stream's length.
-- **Exposing chaff beyond localhost?** (ADR-0018) chaff's defaults assume a
-  single operator on localhost. The streaming surface is safe to put on a
-  network once you set two knobs: `CHAFF_API_TOKEN` requires a shared token on
-  `/stream/jobs` and the `/stream` WebSocket (paste it into the UI's **Access
-  token** field), and `CHAFF_STREAM_ALLOWED_HOSTS` restricts where push jobs may
-  connect. Cloud-metadata / link-local addresses (169.254.x, the SSRF classic)
-  are **always** blocked, no config needed. The `/stream` socket is also bounded
+- **Exposing chaff beyond localhost?** (ADR-0018/0024/0025) chaff's defaults
+  assume a single operator on localhost, and the shipped deployment enforces
+  that: Compose binds to `127.0.0.1`, and with no token set a remote caller
+  gets a 401 explaining why rather than a dataset. To put it on a network, set
+  `CHAFF_BIND=0.0.0.0` **and** `CHAFF_API_TOKEN` — the token is then required
+  on **every** route, from every client including localhost (paste it into the
+  **Access token** box in the page header). `CHAFF_STREAM_ALLOWED_HOSTS`
+  additionally restricts where push jobs may connect. Cloud-metadata /
+  link-local addresses (169.254.x, the SSRF classic) are **always** blocked, no
+  config needed. The `/stream` socket is also bounded
   against connection-exhaustion out of the box (ADR-0019): an idle client that
   never sends a spec is dropped after a short handshake window, and concurrent
   live sockets are capped — tune with `CHAFF_STREAM_HANDSHAKE_TIMEOUT` and

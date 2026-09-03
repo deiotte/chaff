@@ -68,6 +68,12 @@
                         text-transform:uppercase; letter-spacing:.04em; color:#555; }
   .preview-table-name:first-child { margin-top:0; }
   .hdr { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+  .hdr-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .hdr-right label { margin:0; white-space:nowrap; }
+  .hdr-right input { width:190px; }
+  .auth-banner { margin-top:12px; padding:10px 14px; border-radius:8px;
+                 background:#fbf3e6; border:1px solid #e6d9a8; font-size:13px; }
+  .hint-inline { font-weight:400; text-transform:none; letter-spacing:0; }
   .quit-note { max-width:1000px; margin:0 auto; padding:24px; color:var(--muted); }
   .adv-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .adv-label { font-size:12px; color:var(--muted); }
@@ -136,8 +142,21 @@
     </div>
     <!-- Desktop builds only (ADR-0023). The web/Docker UI never shows this:
          /shutdown 404s unless CHAFF_DESKTOP=1. -->
-    <button class="btn ghost" id="quitBtn" hidden>Quit chaff</button>
+    <div class="hdr-right">
+      <!-- Gates every API route (ADR-0025), so it lives here rather than in
+           the Stream tab where it used to be. Blank is correct for a local
+           server: chaff serves localhost without a token. -->
+      <label for="apiToken">Access token <span class="hint-inline">— only if this server sets one</span></label>
+      <input id="apiToken" type="password" placeholder="blank for a local server" autocomplete="off">
+      <!-- Desktop builds only (ADR-0023). The web/Docker UI never shows this:
+           /shutdown 404s unless CHAFF_DESKTOP=1. -->
+      <button class="btn ghost" id="quitBtn" hidden>Quit chaff</button>
+    </div>
   </div>
+  <!-- Shown when the server refuses us (ADR-0025). Without this the page just
+       sits on "Loading…" with no clue why — the exact dead-form experience the
+       North Star rules out. -->
+  <div id="authBanner" class="auth-banner" hidden></div>
 </header>
 
 <main>
@@ -260,7 +279,6 @@
         <div><label>Rate (records/sec, optional)</label><input id="strRate" type="number" min="0" placeholder="e.g. 5"></div>
       </div>
       <p class="hint">Both caps are required — whichever comes first ends the run. Hit a cap and chaff asks before running again, so nothing floods your pipeline unattended.</p>
-      <div style="margin-top:6px"><label>Access token <span style="font-weight:400;text-transform:none;letter-spacing:0">— only needed if this server sets CHAFF_API_TOKEN (leave blank for a local server)</span></label><input id="strToken" type="password" placeholder="blank for local"></div>
       <div class="actions" style="margin-top:10px">
         <button class="btn" id="streamBtn">Start</button>
         <button class="btn ghost" id="stopBtn" disabled>Stop</button>
@@ -301,8 +319,26 @@ let UPDATERS = [];
 let UPD_EXAMPLES = {};
 
 // Populate dropdowns from the live registry — never hardcode (INV-4).
+// One place that turns a refusal into a readable instruction. Returns true
+// when the caller should stop — the response was not usable.
+async function refused(r) {
+  if (r.ok) { $('authBanner').hidden = true; return false; }
+  if (r.status === 401) {
+    let detail = '';
+    try { detail = (await r.json()).detail || ''; } catch (e) { /* not JSON */ }
+    const b = $('authBanner');
+    b.hidden = false;
+    b.textContent = apiToken()
+      ? `That access token was refused by the server. ${detail}`
+      : `This chaff server needs an access token — paste it in the box above. ${detail}`;
+    return true;
+  }
+  return true;
+}
+
 async function loadRegistry() {
   const r = await fetch('/registry');
+  if (await refused(r)) return;
   const reg = await r.json();
   GENERATORS = reg.generators;
   GEN_EXAMPLES = reg.generator_examples || {};
@@ -818,6 +854,7 @@ async function doDownload() {
 // ── Library gallery ──────────────────────────────────────────────
 async function refreshLibrary() {
   const r = await fetch('/library');
+  if (await refused(r)) { $('gallery').innerHTML = '<div class="empty">Unavailable.</div>'; return; }
   const { specs } = await r.json();
   const g = $('gallery');
   if (!specs.length) { g.innerHTML = '<div class="empty">No presets or saved schemas found.</div>'; return; }
@@ -991,7 +1028,28 @@ let _ws = null, _pollTimer = null, _jobId = null, _stopped = false;
 // Optional access token: only meaningful when the server sets CHAFF_API_TOKEN
 // (network-exposed deployments). Blank on a local server = unchanged. Persisted
 // so it survives reloads; sent as a header on REST and a query param on the WS.
-function streamToken() { return ($('strToken')?.value || '').trim(); }
+function apiToken() { return ($('apiToken')?.value || '').trim(); }
+// Back-compat: the token used to be stream-only under a different key.
+function loadStoredToken() {
+  return localStorage.getItem('chaff_api_token')
+      || localStorage.getItem('chaff_stream_token') || '';
+}
+
+// Every same-origin request carries the token. Wrapping fetch here, rather
+// than at each call site, means a fetch added later is authenticated without
+// anyone remembering to do it — the mirror of the server's middleware.
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (input, init = {}) => {
+  const url = typeof input === 'string' ? input : (input && input.url) || '';
+  const sameOrigin = url.startsWith('/') || url.startsWith(location.origin);
+  const token = apiToken();
+  if (sameOrigin && token) {
+    init = { ...init, headers: { ...(init.headers || {}), 'X-Chaff-Token': token } };
+  }
+  return _rawFetch(input, init);
+};
+
+function streamToken() { return apiToken(); }
 function tokenHeaders(base) {
   const t = streamToken();
   return t ? { ...base, 'X-Chaff-Token': t } : base;
@@ -1161,8 +1219,14 @@ $('dismissBtn').onclick = hideReconfirm;
 $('nlKey').onchange = saveKey;
 $('nlProvider').onchange = saveKey;
 // Access token persists in this browser only (like the NL key above).
-$('strToken').value = localStorage.getItem('chaff_stream_token') || '';
-$('strToken').onchange = () => localStorage.setItem('chaff_stream_token', streamToken());
+$('apiToken').value = loadStoredToken();
+$('apiToken').onchange = () => {
+  localStorage.setItem('chaff_api_token', apiToken());
+  // Retry everything the page needs to bootstrap — the registry alone leaves
+  // the gallery stuck on "Loading…".
+  loadRegistry().then(renderAdvancedUI).catch(() => {});
+  refreshLibrary().catch(() => {});
+};
 loadKey();
 loadRegistry().then(renderAdvancedUI);
 refreshLibrary();
