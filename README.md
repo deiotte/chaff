@@ -65,6 +65,11 @@ docker compose up --build          # first run downloads + builds; give it a min
 
 Then open **http://localhost:8000** in your browser. You'll see a form.
 
+> chaff binds to `localhost` only, so nothing else on your network can reach
+> it. That's deliberate: the generation routes have no authentication yet. To
+> expose it on purpose, set `CHAFF_BIND=0.0.0.0` **and** `CHAFF_API_TOKEN` in
+> `.env` — see [ADR-0024](docs/adr/0024-deployment-fails-closed.md).
+
 1. Click any card in **Library** (e.g. *crm_contacts*) to load a ready-made dataset.
 2. Click **Preview** to see sample rows.
 3. Click **Download** to save the file.

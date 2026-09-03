@@ -131,30 +131,72 @@ def test_multitable_row_limit_counts_every_table(client, monkeypatch):
 
 # ── hostile spec names must not break the download ───────────────────
 
-def test_spec_name_cannot_break_the_download_header(client):
-    """A CR/LF in `name` produced an invalid Content-Disposition, which
-    uvicorn rejects at the wire — the download died on a dropped connection
-    rather than returning a file."""
-    evil = 'pwn"\\r\\nX-Injected: yes'
-    body = {"name": evil, "rows": 2, "output": {"format": "csv"},
+def test_control_characters_in_a_name_are_refused_at_load(client):
+    """A CR/LF in `name` used to reach Content-Disposition and produce an
+    invalid header. It is now refused by the contract instead: a name becomes
+    a filename, and rejecting beats sanitizing something that can't be a
+    filename in the first place."""
+    body = {"name": 'pwn"\r\nX-Injected: yes', "rows": 2, "output": {"format": "csv"},
             "columns": [{"name": "x", "generator": "row_id"}]}
     r = client.post("/generate", json=body)
-    assert r.status_code == 200
-    cd = r.headers["content-disposition"]
-    assert "\\r" not in cd and "\\n" not in cd
+    assert r.status_code == 422, r.text
     assert "X-Injected" not in r.headers
 
 
-def test_multitable_zip_name_is_sanitized(client):
-    body = {"name": 'a/../b"', "rows": 2, "output": {"format": "csv"},
-            "columns": [{"name": "x", "generator": "row_id"}],
-            "tables": [{"name": "t", "rows": 2,
-                        "columns": [{"name": "y", "generator": "row_id"}]}]}
+def test_a_legal_but_awkward_name_still_gets_a_safe_header(client):
+    """Quotes aren't path-hostile, so `pwn"` is a legal dataset name — which
+    is exactly why `_content_disposition` still has to escape it."""
+    body = {"name": 'pwn"', "rows": 2, "output": {"format": "csv"},
+            "columns": [{"name": "x", "generator": "row_id"}]}
+    r = client.post("/generate", json=body)
+    assert r.status_code == 200, r.text
+    cd = r.headers["content-disposition"]
+    assert "\r" not in cd and "\n" not in cd
+    assert cd.count('"') == 2, f"unescaped quote in {cd!r}"
+
+
+# ── path traversal via table names (F-06) ────────────────────────────
+
+@pytest.mark.parametrize("bad", ["../../outside/pwn", "a/b", "..", "C:evil"])
+def test_traversing_table_names_are_refused(client, bad):
+    """A table name becomes a filename on disk and a member in the zip.
+    Unvalidated, '../escaped' wrote outside the requested output directory
+    and produced a traversal entry in the archive."""
+    body = {"name": "customers", "rows": 2, "output": {"format": "csv"},
+            "columns": [{"name": "id", "generator": "row_id"}],
+            "tables": [{"name": bad, "rows": 2,
+                        "columns": [{"name": "x", "generator": "row_id"}]}]}
+    assert client.post("/generate", json=body).status_code == 422
+
+
+def test_no_zip_member_can_escape_the_archive(client):
+    """Every member must be a single path component."""
+    body = {"name": "customers", "rows": 2, "output": {"format": "csv"},
+            "columns": [{"name": "id", "generator": "row_id"}],
+            "tables": [{"name": "orders", "rows": 2,
+                        "columns": [{"name": "x", "generator": "row_id"}]}]}
     r = client.post("/generate", json=body)
     assert r.status_code == 200
-    cd = r.headers["content-disposition"]
-    assert '"' not in cd.split("filename=")[1].strip('"')
-    assert "/" not in cd.split("filename=")[1]
+    for member in zipfile.ZipFile(io.BytesIO(r.content)).namelist():
+        assert "/" not in member and "\\" not in member and ".." not in member
+
+
+def test_cli_multitable_cannot_write_outside_the_output_directory(tmp_path):
+    """The damaging half of F-06: the file sink, not the zip. Guarded twice —
+    the name is refused at load, and the resolved path is required to stay
+    under the requested directory."""
+    from chaff.engine import run
+
+    out = tmp_path / "out"
+    out.mkdir()
+    with pytest.raises(Exception):
+        run(load_spec({
+            "name": "customers", "rows": 2, "output": {"format": "csv"},
+            "sink": {"sink": "file", "options": {"path": str(out / "customers.csv")}},
+            "columns": [{"name": "id", "generator": "row_id"}],
+            "tables": [{"name": "../escaped", "rows": 2,
+                        "columns": [{"name": "x", "generator": "row_id"}]}]}))
+    assert not list(tmp_path.glob("escaped*")), "a table escaped the output directory"
 
 
 # ── entity and tables are different modes, not a blend ───────────────
@@ -206,3 +248,26 @@ def test_ui_javascript_parses():
     proc = subprocess.run([node, "--check", "-"], input=script, text=True,
                           capture_output=True)
     assert proc.returncode == 0, f"index.html script does not parse:\n{proc.stderr}"
+
+
+def test_engine_refuses_a_traversing_name_even_without_spec_validation():
+    """The second layer, tested on its own.
+
+    `DatasetSpec` rejects these names, so the engine guard normally never
+    fires — which means it could rot unnoticed. `model_construct` skips
+    validators the way a future internal caller might, and proves the write
+    path refuses independently.
+    """
+    from chaff.engine import _safe_member_name
+    from chaff.spec import ColumnSpec, TableSpec
+
+    with pytest.raises(ValueError, match="unsafe table filename"):
+        _safe_member_name("../escaped", ".csv")
+    with pytest.raises(ValueError, match="unsafe table filename"):
+        _safe_member_name("a/b", ".csv")
+
+    # And end-to-end through run(), with validation bypassed.
+    unvalidated = TableSpec.model_construct(
+        name="../escaped", rows=2,
+        columns=[ColumnSpec(name="x", generator="row_id")])
+    assert unvalidated.name == "../escaped", "model_construct should skip validation"
