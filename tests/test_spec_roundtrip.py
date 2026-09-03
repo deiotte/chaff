@@ -6,6 +6,10 @@ silently dropped it. `moving_tracks` came back as disconnected points with no
 track id and no tick; `order_lifecycle` came back with every row still
 `placed`. Both returned HTTP 200. Confidently-wrong demo data is the one
 outcome worse than an error, so these tests assert the whole spec survives.
+
+The UI half of that contract is proven by `tests/test_ui_browser.py`, which
+drives the real page (ADR-0022). What stays here is the API behaviour plus
+the two source-level properties a browser cannot observe.
 """
 
 import io
@@ -37,27 +41,6 @@ def _examples_with(key):
 @pytest.fixture
 def client():
     return TestClient(app)
-
-
-# ── the UI contract (no JS runtime in CI, so assert on the source) ────
-
-def test_ui_load_preserves_entity_and_tables():
-    """`loadSpecIntoForm` must stash both keys, not just read columns."""
-    body = re.search(r"function loadSpecIntoForm\(spec\) \{(.*?)\n\}", INDEX_HTML, re.S)
-    assert body, "loadSpecIntoForm not found — did the UI get restructured?"
-    assert "spec.entity" in body.group(1), "entity dropped on load (the original bug)"
-    assert "spec.tables" in body.group(1), "tables dropped on load (the original bug)"
-
-
-def test_ui_build_reemits_entity_and_tables():
-    """`baseSpec` must put both keys back on the spec it sends to the API."""
-    body = re.search(r"function baseSpec\(format\) \{(.*?)\n\}", INDEX_HTML, re.S)
-    assert body, "baseSpec not found — did the UI get restructured?"
-    src = body.group(1)
-    assert "spec.entity" in src and "advanced.entity" in src
-    assert "spec.tables" in src and "advanced.tables" in src
-    # An entity spec's length is count × ticks; a stale `rows` would misdescribe it.
-    assert "delete spec.rows" in src
 
 
 # ── entity specs survive the API round trip ──────────────────────────
@@ -186,3 +169,40 @@ def test_entity_plus_tables_is_rejected_at_load():
                    "entity": {"count": 2, "ticks": 2, "updates": []},
                    "tables": [{"name": "b", "rows": 2,
                                "columns": [{"name": "y", "generator": "row_id"}]}]})
+
+
+# ── source-level guards that a browser test can't replace ────────────
+# `tests/test_ui_browser.py` executes the page and is the real proof of
+# behaviour (ADR-0022). Two things survive here because driving the page
+# cannot show them:
+#   - INV-4 compliance is a property of the *source*: a hardcoded list that
+#     happens to match the registry looks identical in a browser.
+#   - a syntax error blanks the page, and a suite of skipped browser tests
+#     would not notice; this fails fast with the parser's own message.
+
+def test_ui_never_hardcodes_updater_ids():
+    """INV-4: the update-rule dropdown comes from the registry. A hardcoded
+    list renders identically until someone registers a new updater and it
+    silently fails to appear — which no browser test would catch, because
+    the page looks correct either way."""
+    body = re.search(r"function updaterOptions\(selected\) \{(.*?)\n\}", INDEX_HTML, re.S)
+    assert body, "updaterOptions not found"
+    assert "UPDATERS" in body.group(1)
+    for hardcoded in ("'movement'", '"movement"', "'lifecycle'", "'drift'"):
+        assert hardcoded not in body.group(1)
+
+
+def test_ui_javascript_parses():
+    """A syntax error blanks the whole page. Every browser test would then
+    fail — but they *skip* without a browser, so this stays as the cheap
+    check that runs anywhere and names the offending line."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("no node available to parse the page")
+    script = INDEX_HTML[INDEX_HTML.rindex("<script>") + len("<script>"):
+                        INDEX_HTML.rindex("</script>")]
+    proc = subprocess.run([node, "--check", "-"], input=script, text=True,
+                          capture_output=True)
+    assert proc.returncode == 0, f"index.html script does not parse:\n{proc.stderr}"

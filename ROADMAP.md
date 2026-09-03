@@ -158,7 +158,7 @@ adds continuous/serve semantics and new transports.
 - tokio: N/A — a Rust async runtime; chaff is single-language Python. The
   concurrency need it implies is served by asyncio (FastAPI) on the serve paths.
 
-## Phase 7 — Close the interface gap  ← IN PROGRESS
+## Phase 7 — Close the interface gap  ← COMPLETE
 The engine outgrew the UI. Phase 3 shipped stateful entities and multi-table
 specs; the spec builder was written before either and only ever knew about
 `columns`. Everything here is about interfaces carrying the whole spec, not
@@ -180,14 +180,43 @@ about new generation features.
       header (uvicorn refused it — a dropped connection, not an injection),
       and a spec setting both `entity` and `tables` was accepted then crashed
       in generation; it's now rejected at load.
-- [ ] **Entity + related-table editors in the UI.** The Advanced panel is
-      read-only: Joe can carry, see and remove an entity/table config, but
-      only the CLI or the NL drafter can author one. The editors are the
-      natural next chunk now that the round-trip is safe.
-- [ ] **A JS test runner.** The round-trip guard asserts on the UI *source*
-      (`tests/test_spec_roundtrip.py`) because CI has no way to execute the
-      page. It catches this bug's return (verified by mutation) but is coarse
-      and breaks on restructuring. A browser-driven test is the real answer.
+- [x] **Entity + related-table editors in the UI (ADR-0021).** ADR-0020's
+      panel was read-only, so authoring either mode still meant hand-written
+      JSON and the CLI. Both are now editable in the page: the entity editor
+      covers count/ticks/id/tick columns plus per-tick update rules (with a
+      live "N rows = entities × ticks" note), and each related table gets a
+      name, a row count and its own full column editor — the same widget the
+      primary table uses, so generators, params examples and the derived
+      formula builder all work inside a related table. Update rules and their
+      params now come from the registry (`@updater(example=...)`,
+      `list_updater_examples()`, served via `/registry`) — INV-4, no updater
+      id hardcoded in the UI. The entity/tables exclusivity from ADR-0020 is
+      enforced by disabling the other button rather than 422-ing after the
+      work is done. Column helpers (`addColumn`, `buildColumns`,
+      `columnsBefore`) are now per-table; `columnsBefore` previously scanned
+      the whole page, which would have offered one table's columns to
+      another's derived column. Verified in a real browser: both modes built
+      from scratch and edited from presets, FK integrity intact.
+- [x] **A JS test runner (ADR-0022).** `tests/test_ui_browser.py` drives the
+      real page with Playwright + Chromium against the real app on a real
+      port, and asserts on **the spec the page puts on the wire** — that's the
+      product (INV-1), and asserting on rendered DOM alone would have missed
+      the ADR-0020 bug the same way the source guards did. A JS console error
+      fails the test, since a silent exception is how that bug hid. Skips
+      cleanly with no browser (`make check` stays runnable for everyone);
+      CI installs Chromium and sets `CHAFF_REQUIRE_BROWSER_TESTS=1` so a
+      broken install fails loudly instead of skipping into a green build.
+      The superseded source guards are retired; the two a browser can't
+      observe stay (INV-4 no-hardcoded-updaters, and `node --check`, which
+      still runs when the browser suite skips). Mutation-verified: dropping
+      the entity/tables emit fails 5 tests, dropping the editor read-back
+      fails 4, unscoping `columnsBefore` fails 1.
+
+### Known gaps
+- No visual-regression coverage: the browser suite asserts behaviour and
+  spec output, not layout or styling. Reviewed by eye for now.
+- A contributor without a browser gets the Python tiers only (ADR-0022
+  accepts this; CI is the backstop).
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)

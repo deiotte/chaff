@@ -15,8 +15,17 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install (with extras)
-        run: pip install -e '.[dev,api,formats-extra,streaming,nl]'
+        run: pip install -e '.[dev,dev-browser,api,formats-extra,streaming,nl]'
+      # The browser-driven UI tests (ADR-0022) skip without a browser, which
+      # would make them silently worthless in CI. Install one so `make check`
+      # really does cover the page, not just the Python.
+      - name: Install Chromium for Playwright
+        run: python -m playwright install --with-deps chromium
       - name: make check
+        # A skipped browser test in CI is a hole, not a pass: this makes the
+        # UI suite fail loudly if the browser install above ever breaks.
+        env:
+          CHAFF_REQUIRE_BROWSER_TESTS: "1"
         run: make check
 
   docker:

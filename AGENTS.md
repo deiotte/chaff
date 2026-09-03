@@ -55,6 +55,12 @@ make examples  # generate all preset datasets into out/
 make run-api   # uvicorn dev server
 ```
 
+`make check` includes browser-driven UI tests (ADR-0022). They **skip** when
+Playwright or a Chromium build isn't present, so `make check` runs anywhere;
+CI installs a browser and sets `CHAFF_REQUIRE_BROWSER_TESTS=1` so a skip
+there is a failure. To run them locally:
+`pip install -e '.[dev-browser]' && python -m playwright install chromium`.
+
 Every change lands with: tests updated, `make check` green, ADR if a decision
 was made, ROADMAP.md updated if scope moved. Don't batch phases — finish and
 verify one before starting the next.
