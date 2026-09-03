@@ -16,3 +16,6 @@ spec-library/
 
 # local secrets (API keys for the "Describe it in English" button)
 .env
+
+# Generated at MSI build time from LICENSE (packaging/msi/make_license_rtf.py)
+packaging/msi/license.rtf

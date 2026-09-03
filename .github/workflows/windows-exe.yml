@@ -41,11 +41,127 @@ jobs:
       - name: Build onefile exe
         run: pyinstaller packaging/chaff.spec
 
-      - name: Verify the exe and stage notices
+      - name: Verify the exe launches and serves the UI
+        # "The file exists" was the old bar. A frozen build that starts and
+        # answers is the one that matters: a missing hidden import only shows
+        # up at runtime, which is exactly what onefile builds get wrong.
+        shell: pwsh
         run: |
           if (-not (Test-Path "dist/chaff.exe")) { throw "chaff.exe not produced" }
           Copy-Item THIRD-PARTY-NOTICES.txt dist/
           Get-Item dist/chaff.exe | Format-List Name, Length
+
+          $env:CHAFF_DESKTOP_PORT = "8123"   # don't guess at a fallback bind
+          $env:CHAFF_NO_BROWSER = "1"        # headless runner
+          $app = Start-Process -FilePath "dist/chaff.exe" -PassThru
+          try {
+            $up = $false
+            foreach ($i in 1..90) {
+              try {
+                $reg = Invoke-RestMethod -Uri "http://127.0.0.1:8123/registry" -TimeoutSec 3
+                if (-not $reg.desktop) { throw "desktop mode not armed in the frozen build" }
+                Write-Host "exe serves /registry; desktop mode armed"
+                $up = $true
+                break
+              } catch { Start-Sleep -Seconds 1 }
+            }
+            if (-not $up) { throw "chaff.exe did not start within 90s" }
+
+            # Prove the Quit path works in the real build, not just in tests.
+            Invoke-RestMethod -Uri "http://127.0.0.1:8123/shutdown" -Method Post -TimeoutSec 5 | Out-Null
+            if (-not $app.WaitForExit(30000)) { throw "exe did not stop on /shutdown" }
+            Write-Host "exe stopped via /shutdown"
+          }
+          finally {
+            if (-not $app.HasExited) { $app.Kill() }
+          }
+
+      # ── Authenticode signing (ADR-0023) ──────────────────────────
+      # Gated on secrets because a code-signing certificate is a purchase.
+      # Without it the build still succeeds and ships an unsigned exe that
+      # shows SmartScreen — the status quo — but says so loudly rather than
+      # looking like it signed.
+      - name: Check for signing credentials
+        id: signing
+        shell: pwsh
+        run: |
+          $available = -not [string]::IsNullOrWhiteSpace("${{ secrets.WINDOWS_PFX_BASE64 }}")
+          "available=$($available.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          if (-not $available) {
+            Write-Host "::warning title=Unsigned build::No WINDOWS_PFX_BASE64 secret; chaff.exe will be UNSIGNED and users will see the SmartScreen prompt. See docs/adr/0023-installers-and-signing.md."
+          }
+
+      - name: Sign chaff.exe
+        if: steps.signing.outputs.available == 'true'
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "chaff-signing.pfx"
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_BASE64))
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+              Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+            if (-not $signtool) { throw "signtool.exe not found on the runner" }
+            & $signtool.FullName sign /f $pfx /p $env:PFX_PASSWORD `
+              /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+              /d "chaff" /du "https://github.com/deiotte/chaff" dist/chaff.exe
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed with $LASTEXITCODE" }
+            & $signtool.FullName verify /pa /v dist/chaff.exe
+            if ($LASTEXITCODE -ne 0) { throw "signature verification failed" }
+          }
+          finally {
+            # The private key must not outlive the step, even on failure.
+            if (Test-Path $pfx) { Remove-Item $pfx -Force }
+          }
+
+      # ── MSI installer (Start-menu shortcut + uninstall entry) ────
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          # Pinned, and pinned to the SAME version for both: `wix extension
+          # add` rejects a wildcard ("Invalid extension version in
+          # ...wixext/5.*") even though `dotnet tool install` accepts one, and
+          # an extension built against a different wix version is unsupported.
+          $wixVersion = "5.0.2"
+          dotnet tool install --global wix --version $wixVersion
+          wix extension add -g WixToolset.UI.wixext/$wixVersion
+          python packaging/msi/make_license_rtf.py packaging/msi/license.rtf
+          $version = "0.1.0.$($env:GITHUB_RUN_NUMBER)"
+          # Named bind paths are `-b name=path` (the .wxs refers to them as
+          # !(bindpath.name)); `-bindpath:name value` is not the v4/v5 syntax.
+          wix build packaging/msi/chaff.wxs `
+            -ext WixToolset.UI.wixext `
+            -d Version=$version `
+            -b exe=dist `
+            -b msi=packaging/msi `
+            -out dist/chaff.msi
+          if (-not (Test-Path "dist/chaff.msi")) { throw "chaff.msi not produced" }
+          Get-Item dist/chaff.msi | Format-List Name, Length
+
+      # An unsigned MSI shows the same SmartScreen prompt the exe does, so it
+      # is signed on exactly the same terms.
+      - name: Sign chaff.msi
+        if: steps.signing.outputs.available == 'true'
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "chaff-signing.pfx"
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_BASE64))
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+              Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+            & $signtool.FullName sign /f $pfx /p $env:PFX_PASSWORD `
+              /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+              /d "chaff installer" dist/chaff.msi
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed with $LASTEXITCODE" }
+          }
+          finally {
+            if (Test-Path $pfx) { Remove-Item $pfx -Force }
+          }
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -53,6 +169,7 @@ jobs:
           name: chaff-windows-exe
           path: |
             dist/chaff.exe
+            dist/chaff.msi
             dist/THIRD-PARTY-NOTICES.txt
           if-no-files-found: error
 
@@ -73,6 +190,7 @@ jobs:
         with:
           files: |
             dist/chaff.exe
+            dist/chaff.msi
             dist/THIRD-PARTY-NOTICES.txt
           fail_on_unmatched_files: true
           generate_release_notes: true
