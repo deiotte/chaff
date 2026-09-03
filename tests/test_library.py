@@ -86,3 +86,43 @@ def test_library_api_roundtrip(libdirs):
     assert client.get("/library/saved_one").json()["rows"] == 5
     assert client.delete("/library/saved_one").json() == {"deleted": "saved_one"}
     assert client.get("/library/saved_one").status_code == 404
+
+
+# ── gallery cards must describe the spec's real shape ────────────────
+
+def test_summary_reports_entity_shape(libdirs):
+    """A time-series preset's card showed "? rows" because `rows` is null on
+    an entity spec — its real length is count × ticks."""
+    presets, _ = libdirs
+    (presets / "tracks.json").write_text(json.dumps({
+        "name": "tracks", "columns": [{"name": "lat", "generator": "latitude"}],
+        "output": {"format": "csv"},
+        "entity": {"count": 10, "ticks": 30, "updates": []}}))
+    card = next(s for s in library.list_specs() if s["name"] == "tracks")
+    assert card["rows"] == 300
+    assert card["entity"] == {"count": 10, "ticks": 30}
+    assert card["tables"] is None
+
+
+def test_summary_reports_every_table(libdirs):
+    """A 3-table preset advertised only the primary table's row count."""
+    presets, _ = libdirs
+    (presets / "shop.json").write_text(json.dumps({
+        "name": "shop", "rows": 50,
+        "columns": [{"name": "id", "generator": "row_id"}],
+        "output": {"format": "csv"},
+        "tables": [
+            {"name": "orders", "rows": 200,
+             "columns": [{"name": "oid", "generator": "row_id"}]},
+            {"name": "lines", "rows": 600,
+             "columns": [{"name": "lid", "generator": "row_id"}]}]}))
+    card = next(s for s in library.list_specs() if s["name"] == "shop")
+    assert card["rows"] == 850           # 50 + 200 + 600, not 50
+    assert card["tables"] == 3           # primary + 2 related
+    assert card["entity"] is None
+
+
+def test_summary_unchanged_for_a_plain_spec(libdirs):
+    card = next(s for s in library.list_specs() if s["name"] == "demo")
+    assert card["rows"] == 10
+    assert card["tables"] is None and card["entity"] is None

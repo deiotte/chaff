@@ -58,6 +58,15 @@
   .msg.ok { color:var(--accent); }
   .hint { color:var(--muted); font-size:12px; margin-top:2px; }
   .empty { color:var(--muted); font-size:13px; }
+  .advanced { margin-top:14px; border-top:1px solid #e6e6e6; padding-top:12px; }
+  .adv-item { display:flex; align-items:center; justify-content:space-between; gap:12px;
+              background:#f6f8fa; border:1px solid #e1e6ea; border-radius:6px;
+              padding:10px 12px; margin-top:8px; font-size:13px; }
+  .adv-meta { color:#666; font-size:12px; margin-top:3px; }
+  .adv-item code { background:#e8ecef; padding:1px 4px; border-radius:3px; }
+  .preview-table-name { margin:14px 0 6px; font-size:12px; font-weight:600;
+                        text-transform:uppercase; letter-spacing:.04em; color:#555; }
+  .preview-table-name:first-child { margin-top:0; }
   .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px; }
   .spec-card { text-align:left; border:1px solid var(--line); border-radius:9px; padding:11px 12px;
                background:#fff; cursor:pointer; font:inherit; color:inherit; transition:border-color .12s; }
@@ -147,6 +156,9 @@
       <div><label>Rows</label><input id="rows" type="number" min="1" value="100"></div>
       <div><label>Seed (optional, for repeatable output)</label><input id="seed" type="number" placeholder="e.g. 1337"></div>
     </div>
+    <!-- Populated by renderAdvanced() when the loaded spec carries an entity
+         (ADR-0009) or related tables (ADR-0008). Hidden for plain specs. -->
+    <div id="advanced" class="advanced" style="display:none"></div>
   </section>
 
   <section class="card">
@@ -433,6 +445,13 @@ function addColumn(name = '', generator = '', params = null, nullRate = 0) {
 }
 
 // Reverse of buildSpec: hydrate the form from a loaded/preset spec.
+// Spec parts the column form can't express yet: stateful entities (ADR-0009)
+// and related tables (ADR-0008). They ride along with the loaded spec and are
+// re-emitted verbatim by buildSpec, so loading a preset and hitting Download
+// gives you the dataset the preset actually describes. Dropping them silently
+// would hand Joe confidently-wrong data — the one outcome worse than an error.
+let advanced = { entity: null, tables: null };
+
 function loadSpecIntoForm(spec) {
   $('name').value = spec.name || 'dataset';
   $('rows').value = spec.rows || 100;
@@ -440,7 +459,53 @@ function loadSpecIntoForm(spec) {
   if (spec.output && spec.output.format) $('format').value = spec.output.format;
   $('cols').innerHTML = '';
   (spec.columns || []).forEach(c => addColumn(c.name, c.generator, c.params, c.null_rate));
+  advanced = { entity: spec.entity || null, tables: spec.tables || null };
+  renderAdvanced();
   setMsg(`Loaded "${spec.name}"`, 'ok');
+}
+
+// Show what's attached to the spec beyond the column list, and let it be
+// dropped. Read-only by design: a full editor is a bigger piece of work, but
+// Joe must at least be able to SEE why he's getting 300 rows from 10 entities,
+// and be able to get back to a plain flat table without reloading the page.
+function renderAdvanced() {
+  const el = $('advanced');
+  const bits = [];
+  if (advanced.entity) {
+    const e = advanced.entity;
+    const updaters = (e.updates || []).map(u => u.updater).join(', ') || 'none';
+    bits.push(`<div class="adv-item">
+      <div><b>Time series</b> — ${esc(e.count)} entities × ${esc(e.ticks)} ticks
+      = <b>${esc(e.count * e.ticks)} rows</b>
+      <div class="adv-meta">id: <code>${esc(e.id_column)}</code> ·
+        tick: <code>${esc(e.tick_column)}</code> · updates: ${esc(updaters)}</div></div>
+      <button class="btn ghost" onclick="dropAdvanced('entity')">Remove</button>
+    </div>`);
+  }
+  if (advanced.tables) {
+    const names = advanced.tables.map(t => `${esc(t.name)} (${esc(t.rows)})`).join(', ');
+    bits.push(`<div class="adv-item">
+      <div><b>Related tables</b> — downloads as a .zip, one file per table
+      <div class="adv-meta">${esc($('name').value || 'primary')} (primary), ${names}</div></div>
+      <button class="btn ghost" onclick="dropAdvanced('tables')">Remove</button>
+    </div>`);
+  }
+  el.innerHTML = bits.join('');
+  el.style.display = bits.length ? 'block' : 'none';
+
+  const rowsBox = $('rows');
+  rowsBox.disabled = !!advanced.entity;
+  rowsBox.title = advanced.entity
+    ? 'Not used: this spec\'s length is entities × ticks.' : '';
+  rowsBox.style.opacity = advanced.entity ? 0.5 : 1;
+}
+
+function dropAdvanced(key) {
+  advanced[key] = null;
+  renderAdvanced();
+  setMsg(key === 'entity'
+    ? 'Time series removed — this is a flat table now.'
+    : 'Related tables removed — only the primary table will be generated.', 'ok');
 }
 
 // The columns table — shared by the Batch and Stream tabs (one spec, INV-1).
@@ -474,6 +539,11 @@ function baseSpec(format) {
     output: { format },
   };
   if (seedRaw !== '') spec.seed = parseInt(seedRaw, 10);
+  // Carry the parts the form doesn't edit straight back out, so what we send
+  // is what was loaded. An entity spec derives its length from count × ticks,
+  // so the `rows` box doesn't apply and would only be misleading.
+  if (advanced.entity) { spec.entity = advanced.entity; delete spec.rows; }
+  if (advanced.tables) spec.tables = advanced.tables;
   return spec;
 }
 
@@ -495,20 +565,36 @@ async function doPreview() {
   const r = await fetch('/preview?limit=15', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
   if (!r.ok) return setMsg(await apiError(r), 'err');
-  const { rows } = await r.json();
-  renderPreview(rows);
-  setMsg(`${rows.length} sample rows`, 'ok');
+  const { rows, tables } = await r.json();
+  renderPreview(rows, tables);
+  setMsg(tables
+    ? `${Object.keys(tables).length} related tables — sample rows below`
+    : `${rows.length} sample rows`, 'ok');
 }
 
-function renderPreview(rows) {
-  const el = $('preview');
-  if (!rows.length) { el.className = 'empty'; el.textContent = 'No rows.'; return; }
-  el.className = '';
+function previewTable(rows) {
+  if (!rows.length) return '<div class="empty">No rows.</div>';
   const cols = Object.keys(rows[0]);
   const head = '<tr>' + cols.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
   const body = rows.map(r => '<tr>' + cols.map(c =>
     `<td>${r[c] === null ? '<span style="color:#aaa">null</span>' : esc(r[c])}</td>`).join('') + '</tr>').join('');
-  el.innerHTML = `<table>${head}${body}</table>`;
+  return `<table>${head}${body}</table>`;
+}
+
+// `tables` (multi-table specs) renders one labelled section per table so the
+// foreign keys are visible side by side; a plain spec renders exactly as before.
+function renderPreview(rows, tables) {
+  const el = $('preview');
+  if (tables) {
+    el.className = '';
+    el.innerHTML = Object.entries(tables).map(([name, rs]) =>
+      `<div class="preview-table-name">${esc(name)} · ${esc(rs.length)} shown</div>` +
+      previewTable(rs)).join('');
+    return;
+  }
+  if (!rows.length) { el.className = 'empty'; el.textContent = 'No rows.'; return; }
+  el.className = '';
+  el.innerHTML = previewTable(rows);
 }
 
 async function doDownload() {
@@ -528,7 +614,10 @@ async function doDownload() {
   const a = document.createElement('a');
   a.href = url; a.download = filename; document.body.appendChild(a); a.click();
   a.remove(); URL.revokeObjectURL(url);
-  setMsg(`Downloaded ${filename} (${blob.size} bytes)`, 'ok');
+  const tabl = r.headers.get('X-Chaff-Tables');
+  setMsg(tabl
+    ? `Downloaded ${filename} (${blob.size} bytes) — contains ${tabl.split(',').length} files: ${tabl.replace(/,/g, ', ')}`
+    : `Downloaded ${filename} (${blob.size} bytes)`, 'ok');
 }
 
 // ── Library gallery ──────────────────────────────────────────────
@@ -541,9 +630,15 @@ async function refreshLibrary() {
   specs.forEach(s => {
     const card = document.createElement('button');
     card.className = 'spec-card';
+    // Say what the spec really is: a 3-table spec or a 10×30 time series is
+    // not "50 rows, 5 cols", and a card that says so sends Joe into a demo
+    // with the wrong dataset.
+    const shape = s.tables ? `${esc(s.tables)} tables`
+                : s.entity ? `${esc(s.entity.count)}×${esc(s.entity.ticks)} time series`
+                : `${esc(s.columns ?? '?')} cols`;
     card.innerHTML =
       `<div class="nm">${esc(s.name)}<span class="badge ${esc(s.source)}">${esc(s.source)}</span></div>
-       <div class="meta">${esc(s.rows ?? '?')} rows · ${esc(s.columns ?? '?')} cols · ${esc(s.format ?? '?')}</div>` +
+       <div class="meta">${esc(s.rows ?? '?')} rows · ${shape} · ${esc(s.format ?? '?')}</div>` +
       (s.description ? `<div class="desc">${esc(s.description)}</div>` : '');
     card.onclick = () => loadNamed(s.name);
     g.appendChild(card);

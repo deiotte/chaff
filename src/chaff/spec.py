@@ -143,6 +143,23 @@ class DatasetSpec(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _entity_and_tables_are_exclusive(self) -> "DatasetSpec":
+        """`entity` and `tables` describe incompatible generation modes.
+
+        The engine takes the multi-table path first and never looks at
+        `entity`, so a spec carrying both silently loses the entity config —
+        and with `rows` omitted (legal for an entity spec) the table path has
+        no row count and crashes deep in generation. Reject the combination
+        here so the CLI, API and UI all get one clear error at load time.
+        """
+        if self.entity and self.tables:
+            raise ValueError(
+                "a spec cannot set both `entity` and `tables`: stateful entities "
+                "and multi-table generation are different modes. Use one or the other."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _table_names_unique(self) -> "DatasetSpec":
         if self.tables:
             names = [self.name] + [t.name for t in self.tables]

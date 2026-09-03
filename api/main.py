@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import html
+import io
 import json
 import os
+import re
 import sys
 import time
+import zipfile
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -24,7 +27,13 @@ from pydantic import BaseModel, ValidationError
 from . import auth
 
 from chaff import __version__, library
-from chaff.engine import effective_row_count, generate_records, iter_records
+from chaff.engine import (
+    effective_row_count,
+    encode_tables,
+    generate_records,
+    generate_tables,
+    iter_records,
+)
 from chaff.formats import get_encoder, get_extension, get_record_encoder, list_formats
 from chaff.generators import (
     list_generator_examples,
@@ -90,20 +99,49 @@ def registry():
     }
 
 
-def _reject_multitable(spec: DatasetSpec) -> None:
-    if spec.tables:
-        raise HTTPException(
-            status_code=400,
-            detail="multi-table specs aren't supported over the API yet "
-                   "(one request = one file); generate them with the CLI: chaff generate",
-        )
+def _content_disposition(filename: str) -> str:
+    """A Content-Disposition value that a hostile `spec.name` can't break.
+
+    `name` is free text the user types, and it lands in a response header.
+    A CR/LF or a quote in it produced an invalid header, which uvicorn
+    rejects at the wire — the download died with a dropped connection
+    instead of a file. Strip anything that isn't safe in a quoted filename
+    and fall back to a usable default if nothing survives.
+    """
+    cleaned = re.sub(r'[^A-Za-z0-9._-]', "_", filename).lstrip(".") or "dataset"
+    return f'attachment; filename="{cleaned[:120]}"'
+
+
+def _capped_tables(spec: DatasetSpec, limit: int) -> DatasetSpec:
+    """A multi-table spec with every table's row count capped, for preview.
+
+    FK integrity survives the cap: children still draw their keys from the
+    (smaller) parents actually generated, so a preview never shows a dangling
+    reference.
+    """
+    return spec.model_copy(update={
+        "rows": min(spec.rows, limit),
+        "tables": [t.model_copy(update={"rows": min(t.rows, limit)}) for t in spec.tables],
+    })
 
 
 @app.post("/preview")
 def preview(spec: DatasetSpec, limit: int = 10):
-    """First N rows for the UI's live preview pane."""
-    _reject_multitable(spec)
+    """First N rows for the UI's live preview pane.
+
+    Always returns `rows` (the primary table) so single-table callers are
+    unchanged. A multi-table spec additionally returns `tables`, mapping each
+    table name to its own sample rows — the UI shows one section per table so
+    Joe can see the foreign keys line up before he downloads anything.
+    """
     limit = max(1, min(limit, PREVIEW_MAX_ROWS))
+    if spec.tables:
+        try:
+            tables = generate_tables(_capped_tables(spec, limit))
+        except (KeyError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        sampled = {name: rows[:limit] for name, rows in tables.items()}
+        return {"rows": sampled.get(spec.name, []), "tables": sampled}
     if spec.entity:
         # Bound preview work for entity specs: a few entities over a few ticks.
         capped_entity = spec.entity.model_copy(update={
@@ -127,8 +165,9 @@ def generate(spec: DatasetSpec):
     (ndjson/csv straight from the generator) arrives with the Phase 2
     streaming-encoder signature.
     """
-    _reject_multitable(spec)
     _enforce_row_limit(effective_row_count(spec))
+    if spec.tables:
+        return _generate_multitable_zip(spec)
     try:
         rows = generate_records(spec)
         payload = get_encoder(spec.output.format)(spec, rows)
@@ -147,8 +186,53 @@ def generate(spec: DatasetSpec):
         _stream(),
         media_type=media_type,
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": _content_disposition(filename),
             "Content-Length": str(len(payload)),
+        },
+    )
+
+
+# ── Multi-table download (ADR-0020) ──────────────────────────────────
+# One HTTP request still yields one file — that file is a zip holding one
+# encoded file per table. The engine does the generating and encoding
+# (INV-1); this only packages the bytes it hands back.
+
+_ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)  # zip's minimum date_time; pinned for INV-3
+
+
+def _generate_multitable_zip(spec: DatasetSpec) -> StreamingResponse:
+    """Bundle a multi-table spec's tables into one deterministic zip.
+
+    Entry timestamps are pinned to the zip epoch and entries are written in
+    the engine's dependency order, so the same spec + seed produces a
+    byte-identical archive every time (INV-3) — not just identical members.
+    """
+    try:
+        encoded = encode_tables(spec)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    buf = io.BytesIO()
+    # No compression: deflate output can vary across zlib builds, which would
+    # break byte-for-byte reproducibility of the archive itself.
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
+        for _name, filename, payload in encoded:
+            zf.writestr(zipfile.ZipInfo(filename, date_time=_ZIP_EPOCH), payload)
+    payload = buf.getvalue()
+
+    def _stream() -> Iterator[bytes]:
+        for i in range(0, len(payload), DOWNLOAD_CHUNK):
+            yield payload[i:i + DOWNLOAD_CHUNK]
+
+    return StreamingResponse(
+        _stream(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": _content_disposition(f"{spec.name}.zip"),
+            "Content-Length": str(len(payload)),
+            # Table names are user text; keep the header wire-safe.
+            "X-Chaff-Tables": ",".join(
+                re.sub(r"[^A-Za-z0-9._-]", "_", name) for name, _, _ in encoded),
         },
     )
 

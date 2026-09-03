@@ -47,8 +47,8 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
 - [x] Multi-table specs with FK integrity (customers -> orders -> lines)
       — `TableSpec` + `DatasetSpec.tables` (ADR-0008), `fk` generator,
       dependency-ordered generation (cycle/missing detection), one file per
-      table. Deterministic; single-table path unchanged. CLI-only for now
-      (API rejects multi-table). Example: `examples/retail_orders.json`.
+      table. Deterministic; single-table path unchanged. Available from the
+      CLI, the API and the UI (ADR-0020). Example: `examples/retail_orders.json`.
 - [x] Stateful entities over time: tracks that move, lifecycles that
       transition — `EntitySpec` on the `entity` seam (ADR-0009), `@updater`
       registry (movement/lifecycle/drift) + `EntityContext`, `count × ticks`
@@ -157,6 +157,37 @@ adds continuous/serve semantics and new transports.
   streaming transport. Revisit alongside gRPC.
 - tokio: N/A — a Rust async runtime; chaff is single-language Python. The
   concurrency need it implies is served by asyncio (FastAPI) on the serve paths.
+
+## Phase 7 — Close the interface gap  ← IN PROGRESS
+The engine outgrew the UI. Phase 3 shipped stateful entities and multi-table
+specs; the spec builder was written before either and only ever knew about
+`columns`. Everything here is about interfaces carrying the whole spec, not
+about new generation features.
+- [x] **Whole-spec round-trip (ADR-0020).** The UI silently dropped `entity`
+      and `tables` on load, so 4 of 12 shipped presets were broken from the
+      gallery — and 3 of them failed *silently*, returning HTTP 200 with
+      confidently wrong data (`moving_tracks` with no track id or tick;
+      `order_lifecycle` with every row stuck at `placed`). The UI now carries
+      both keys verbatim and shows what's attached in an Advanced panel
+      (with Remove); `/preview` returns a per-table sample map and
+      `/generate` returns a deterministic zip (`ZIP_STORED`, pinned entry
+      timestamps — INV-3 covers the archive, not just its members), so
+      multi-table is no longer CLI-only; `effective_row_count` sums every
+      table so the API ceiling stops undercounting; gallery cards report the
+      shape the spec actually has ("850 rows · 3 tables", "300 rows · 10×30
+      time series"). Verified in a real browser. Fixed two pre-existing
+      defects found while verifying: a CR/LF in `spec.name` broke the download
+      header (uvicorn refused it — a dropped connection, not an injection),
+      and a spec setting both `entity` and `tables` was accepted then crashed
+      in generation; it's now rejected at load.
+- [ ] **Entity + related-table editors in the UI.** The Advanced panel is
+      read-only: Joe can carry, see and remove an entity/table config, but
+      only the CLI or the NL drafter can author one. The editors are the
+      natural next chunk now that the round-trip is safe.
+- [ ] **A JS test runner.** The round-trip guard asserts on the UI *source*
+      (`tests/test_spec_roundtrip.py`) because CI has no way to execute the
+      page. It catches this bug's return (verified by mutation) but is coarse
+      and breaks on restructuring. A browser-driven test is the real answer.
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
