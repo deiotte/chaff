@@ -6,6 +6,10 @@ silently dropped it. `moving_tracks` came back as disconnected points with no
 track id and no tick; `order_lifecycle` came back with every row still
 `placed`. Both returned HTTP 200. Confidently-wrong demo data is the one
 outcome worse than an error, so these tests assert the whole spec survives.
+
+The UI half of that contract is proven by `tests/test_ui_browser.py`, which
+drives the real page (ADR-0022). What stays here is the API behaviour plus
+the two source-level properties a browser cannot observe.
 """
 
 import io
@@ -37,27 +41,6 @@ def _examples_with(key):
 @pytest.fixture
 def client():
     return TestClient(app)
-
-
-# ── the UI contract (no JS runtime in CI, so assert on the source) ────
-
-def test_ui_load_preserves_entity_and_tables():
-    """`loadSpecIntoForm` must stash both keys, not just read columns."""
-    body = re.search(r"function loadSpecIntoForm\(spec\) \{(.*?)\n\}", INDEX_HTML, re.S)
-    assert body, "loadSpecIntoForm not found — did the UI get restructured?"
-    assert "spec.entity" in body.group(1), "entity dropped on load (the original bug)"
-    assert "spec.tables" in body.group(1), "tables dropped on load (the original bug)"
-
-
-def test_ui_build_reemits_entity_and_tables():
-    """`baseSpec` must put both keys back on the spec it sends to the API."""
-    body = re.search(r"function baseSpec\(format\) \{(.*?)\n\}", INDEX_HTML, re.S)
-    assert body, "baseSpec not found — did the UI get restructured?"
-    src = body.group(1)
-    assert "spec.entity" in src and "advanced.entity" in src
-    assert "spec.tables" in src and "advanced.tables" in src
-    # An entity spec's length is count × ticks; a stale `rows` would misdescribe it.
-    assert "delete spec.rows" in src
 
 
 # ── entity specs survive the API round trip ──────────────────────────
@@ -188,73 +171,31 @@ def test_entity_plus_tables_is_rejected_at_load():
                                "columns": [{"name": "y", "generator": "row_id"}]}]})
 
 
-# ── the editors (ADR-0021) ───────────────────────────────────────────
-# Same constraint as above: CI has no JS runtime, so the editor contract is
-# asserted on the page source. These assert on function *names*, so a rename
-# fails the test rather than silently passing — the guard is only as good as
-# that coupling, which is why a browser-driven test is still the better
-# long-term answer (ROADMAP Phase 7).
-
-def test_editors_exist_for_both_modes():
-    """Carrying a spec part is no longer enough — Joe must be able to author
-    one without dropping to the CLI."""
-    for fn in ("renderEntityEditor", "renderTablesEditor", "addTableCard",
-               "addUpdateRow", "syncAdvancedFromEditors"):
-        assert f"function {fn}" in INDEX_HTML, f"{fn} missing from the UI"
-    assert 'id="addEntityBtn"' in INDEX_HTML
-    assert 'id="addTableBtn"' in INDEX_HTML
-
-
-def test_build_reads_the_editors_back():
-    """The DOM is authoritative while an editor is open. Without this sync a
-    spec would ship the values the editor was *opened* with, silently
-    discarding every edit — the same class of bug as ADR-0020."""
-    body = re.search(r"function baseSpec\(format\) \{(.*?)\n\}", INDEX_HTML, re.S)
-    assert body, "baseSpec not found"
-    # Matches with or without args — the call is what matters, and it must
-    # validate, since this is the path that produces a spec for the server.
-    assert re.search(r"syncAdvancedFromEditors\(\s*true\s*\)", body.group(1)), \
-        "baseSpec must sync the editors back, with validation on"
-
-
-def test_column_helpers_are_scoped_to_one_table():
-    """`columnsBefore` feeds the derived-column picker. Scanning every `.col`
-    on the page would offer table B's columns to a derived column in table A,
-    which the engine then rejects at load (spec.py validates per-table)."""
-    body = re.search(r"function columnsBefore\(colDiv\) \{(.*?)\n\}", INDEX_HTML, re.S)
-    assert body, "columnsBefore not found"
-    assert "document.querySelectorAll" not in body.group(1), \
-        "columnsBefore must not scan the whole page"
-    assert "colDiv.parentElement" in body.group(1)
-
-    for fn in ("addColumn", "buildColumns"):
-        sig = re.search(rf"function {fn}\(([^)]*)\)", INDEX_HTML, re.S)
-        assert sig and "container" in sig.group(1), f"{fn} must take a container"
-
+# ── source-level guards that a browser test can't replace ────────────
+# `tests/test_ui_browser.py` executes the page and is the real proof of
+# behaviour (ADR-0022). Two things survive here because driving the page
+# cannot show them:
+#   - INV-4 compliance is a property of the *source*: a hardcoded list that
+#     happens to match the registry looks identical in a browser.
+#   - a syntax error blanks the page, and a suite of skipped browser tests
+#     would not notice; this fails fast with the parser's own message.
 
 def test_ui_never_hardcodes_updater_ids():
-    """INV-4: the dropdown comes from the registry. A hardcoded list silently
-    goes stale the moment someone registers a new updater."""
+    """INV-4: the update-rule dropdown comes from the registry. A hardcoded
+    list renders identically until someone registers a new updater and it
+    silently fails to appear — which no browser test would catch, because
+    the page looks correct either way."""
     body = re.search(r"function updaterOptions\(selected\) \{(.*?)\n\}", INDEX_HTML, re.S)
-    assert body and "UPDATERS" in body.group(1)
+    assert body, "updaterOptions not found"
+    assert "UPDATERS" in body.group(1)
     for hardcoded in ("'movement'", '"movement"', "'lifecycle'", "'drift'"):
         assert hardcoded not in body.group(1)
 
 
-def test_ui_enforces_entity_tables_exclusivity():
-    """The spec contract rejects both at once; the UI must not let the user
-    build that spec in the first place (a 422 after the fact is a worse
-    experience than a disabled button)."""
-    body = re.search(r"function renderAdvancedUI\(\) \{(.*?)\n\}", INDEX_HTML, re.S)
-    assert body, "renderAdvancedUI not found"
-    src = body.group(1)
-    assert "addEntityBtn').disabled" in src and "addTableBtn').disabled" in src
-
-
 def test_ui_javascript_parses():
-    """A syntax error in index.html is invisible to every other test here —
-    they only regex the source — and turns the whole page into a blank
-    screen. Parse it for real when a JS engine is available."""
+    """A syntax error blanks the whole page. Every browser test would then
+    fail — but they *skip* without a browser, so this stays as the cheap
+    check that runs anywhere and names the offending line."""
     import shutil
     import subprocess
     node = shutil.which("node")

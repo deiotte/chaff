@@ -217,6 +217,16 @@ make notices        # regenerate THIRD-PARTY-NOTICES.txt (bundled-deps attributi
 make license-check  # fail if any bundled dependency is non-permissive
 ```
 
+`make check` includes browser-driven UI tests (ADR-0022) that drive the real
+page against the real server. They **skip** if you don't have a browser
+installed, so `make check` works out of the box — CI always runs them. To run
+them locally too:
+
+```bash
+pip install -e '.[dev-browser]'
+python -m playwright install chromium
+```
+
 ## License
 
 chaff is **MIT licensed** — see [`LICENSE`](LICENSE). Use it, fork it, ship it.

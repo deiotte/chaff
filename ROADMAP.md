@@ -158,7 +158,7 @@ adds continuous/serve semantics and new transports.
 - tokio: N/A — a Rust async runtime; chaff is single-language Python. The
   concurrency need it implies is served by asyncio (FastAPI) on the serve paths.
 
-## Phase 7 — Close the interface gap  ← IN PROGRESS
+## Phase 7 — Close the interface gap  ← COMPLETE
 The engine outgrew the UI. Phase 3 shipped stateful entities and multi-table
 specs; the spec builder was written before either and only ever knew about
 `columns`. Everything here is about interfaces carrying the whole spec, not
@@ -197,13 +197,26 @@ about new generation features.
       the whole page, which would have offered one table's columns to
       another's derived column. Verified in a real browser: both modes built
       from scratch and edited from presets, FK integrity intact.
-- [ ] **A JS test runner.** The round-trip and editor guards assert on the UI
-      *source* (`tests/test_spec_roundtrip.py`) because CI has no way to
-      execute the page. Every assertion is mutation-tested, and a
-      `node --check` test now parses the script for real (skipped when no JS
-      engine is present) — but source assertions stay coarse and break on
-      restructuring. A browser-driven test is still the real answer:
-      Playwright + the pre-installed Chromium already drive this UI locally.
+- [x] **A JS test runner (ADR-0022).** `tests/test_ui_browser.py` drives the
+      real page with Playwright + Chromium against the real app on a real
+      port, and asserts on **the spec the page puts on the wire** — that's the
+      product (INV-1), and asserting on rendered DOM alone would have missed
+      the ADR-0020 bug the same way the source guards did. A JS console error
+      fails the test, since a silent exception is how that bug hid. Skips
+      cleanly with no browser (`make check` stays runnable for everyone);
+      CI installs Chromium and sets `CHAFF_REQUIRE_BROWSER_TESTS=1` so a
+      broken install fails loudly instead of skipping into a green build.
+      The superseded source guards are retired; the two a browser can't
+      observe stay (INV-4 no-hardcoded-updaters, and `node --check`, which
+      still runs when the browser suite skips). Mutation-verified: dropping
+      the entity/tables emit fails 5 tests, dropping the editor read-back
+      fails 4, unscoping `columnsBefore` fails 1.
+
+### Known gaps
+- No visual-regression coverage: the browser suite asserts behaviour and
+  spec output, not layout or styling. Reviewed by eye for now.
+- A contributor without a browser gets the Python tiers only (ADR-0022
+  accepts this; CI is the backstop).
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
