@@ -66,6 +66,20 @@ def _produce(producer: Any, topic: str, records: Iterator[bytes],
     return n
 
 
+def effective_config(opts: dict) -> dict:
+    """The exact config the Producer will be constructed with (ADR-0026).
+
+    Exists so egress policy can vet the *effective* destination instead of the
+    pre-merge one. `options.config` is a passthrough to confluent-kafka, and it
+    can set `bootstrap.servers` — so a spec could name a safe broker, pass
+    policy, and then have the nested config replace it with anything. Policy
+    and the producer now read the same function; they cannot disagree.
+    """
+    config = {"bootstrap.servers": opts.get("bootstrap_servers", "localhost:9092")}
+    config.update(opts.get("config", {}))
+    return config
+
+
 @stream_sink("kafka")
 def kafka_sink(spec: DatasetSpec, records: Iterator[bytes]) -> str:
     try:
@@ -79,14 +93,13 @@ def kafka_sink(spec: DatasetSpec, records: Iterator[bytes]) -> str:
     topic = opts.get("topic")
     if not topic:
         raise ValueError("kafka sink requires options.topic")
-    servers = opts.get("bootstrap_servers", "localhost:9092")
     flush_timeout = float(opts.get("flush_timeout", 10))
     key = opts.get("key")
     if isinstance(key, str):
         key = key.encode("utf-8")
 
-    config = {"bootstrap.servers": servers}
-    config.update(opts.get("config", {}))
+    config = effective_config(opts)
+    servers = config["bootstrap.servers"]
 
     producer = _make_producer(Producer, config)
     n = _produce(producer, topic, records, key, flush_timeout)

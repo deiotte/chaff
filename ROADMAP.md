@@ -282,10 +282,22 @@ unless a specific claim fails to reproduce.
       deliberately exempts it, and a test fails on any route not accounted for.
       The UI wraps `fetch` for the same reason, moved its token box to the
       header, and explains a refusal instead of dying on "Loading…".
-- [ ] **F-03/F-04 Egress is not default-deny**, and the Kafka policy check can
-      be bypassed via nested `config.bootstrap.servers`, a safe first broker,
-      or bracketed IPv6. Needs the policy applied to the *effective* producer
-      config, not the pre-merge options.
+- [x] **F-03/F-04 Egress policy checked the wrong thing (ADR-0026).** Three
+      confirmed bypasses: only the first `bootstrap.servers` entry was vetted;
+      bracketed IPv6 (`[fe80::1]`) didn't parse so "resolves to nothing" read
+      as "not blocked"; and the nested `options.config` — a passthrough to
+      confluent-kafka — could replace `bootstrap.servers` *after* the check,
+      so the policy approved a safe broker while the producer was built with
+      the metadata address. Now `kafka.effective_config()` computes the exact
+      producer dict and both the sink and the policy call it, so they cannot
+      disagree; `sink_hosts()` returns every endpoint, canonicalised in one
+      parser. Strict egress (`CHAFF_STREAM_EGRESS`) allows only
+      globally-routable unicast — written as an allow-rule because a deny-list
+      misses CGNAT (not `is_private` in the stdlib) and multicast (reports
+      `is_global`) — and defaults to on when a token is configured, i.e. when
+      chaff is a network service rather than a local tool. **Deliberately not
+      blanket default-deny:** pushing demo data to your own `localhost:9092` or
+      `kafka:9092` is the feature, and tests assert the local demo still works.
 - [ ] **F-05 Saved specs store sink credentials in clear JSON** — bearer
       tokens round-trip through `/library` verbatim.
 - [ ] **F-09 No cost budget or active-job cap**: `expr: a * 1000000` yields a
