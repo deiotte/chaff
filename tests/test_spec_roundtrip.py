@@ -186,3 +186,82 @@ def test_entity_plus_tables_is_rejected_at_load():
                    "entity": {"count": 2, "ticks": 2, "updates": []},
                    "tables": [{"name": "b", "rows": 2,
                                "columns": [{"name": "y", "generator": "row_id"}]}]})
+
+
+# ── the editors (ADR-0021) ───────────────────────────────────────────
+# Same constraint as above: CI has no JS runtime, so the editor contract is
+# asserted on the page source. These assert on function *names*, so a rename
+# fails the test rather than silently passing — the guard is only as good as
+# that coupling, which is why a browser-driven test is still the better
+# long-term answer (ROADMAP Phase 7).
+
+def test_editors_exist_for_both_modes():
+    """Carrying a spec part is no longer enough — Joe must be able to author
+    one without dropping to the CLI."""
+    for fn in ("renderEntityEditor", "renderTablesEditor", "addTableCard",
+               "addUpdateRow", "syncAdvancedFromEditors"):
+        assert f"function {fn}" in INDEX_HTML, f"{fn} missing from the UI"
+    assert 'id="addEntityBtn"' in INDEX_HTML
+    assert 'id="addTableBtn"' in INDEX_HTML
+
+
+def test_build_reads_the_editors_back():
+    """The DOM is authoritative while an editor is open. Without this sync a
+    spec would ship the values the editor was *opened* with, silently
+    discarding every edit — the same class of bug as ADR-0020."""
+    body = re.search(r"function baseSpec\(format\) \{(.*?)\n\}", INDEX_HTML, re.S)
+    assert body, "baseSpec not found"
+    # Matches with or without args — the call is what matters, and it must
+    # validate, since this is the path that produces a spec for the server.
+    assert re.search(r"syncAdvancedFromEditors\(\s*true\s*\)", body.group(1)), \
+        "baseSpec must sync the editors back, with validation on"
+
+
+def test_column_helpers_are_scoped_to_one_table():
+    """`columnsBefore` feeds the derived-column picker. Scanning every `.col`
+    on the page would offer table B's columns to a derived column in table A,
+    which the engine then rejects at load (spec.py validates per-table)."""
+    body = re.search(r"function columnsBefore\(colDiv\) \{(.*?)\n\}", INDEX_HTML, re.S)
+    assert body, "columnsBefore not found"
+    assert "document.querySelectorAll" not in body.group(1), \
+        "columnsBefore must not scan the whole page"
+    assert "colDiv.parentElement" in body.group(1)
+
+    for fn in ("addColumn", "buildColumns"):
+        sig = re.search(rf"function {fn}\(([^)]*)\)", INDEX_HTML, re.S)
+        assert sig and "container" in sig.group(1), f"{fn} must take a container"
+
+
+def test_ui_never_hardcodes_updater_ids():
+    """INV-4: the dropdown comes from the registry. A hardcoded list silently
+    goes stale the moment someone registers a new updater."""
+    body = re.search(r"function updaterOptions\(selected\) \{(.*?)\n\}", INDEX_HTML, re.S)
+    assert body and "UPDATERS" in body.group(1)
+    for hardcoded in ("'movement'", '"movement"', "'lifecycle'", "'drift'"):
+        assert hardcoded not in body.group(1)
+
+
+def test_ui_enforces_entity_tables_exclusivity():
+    """The spec contract rejects both at once; the UI must not let the user
+    build that spec in the first place (a 422 after the fact is a worse
+    experience than a disabled button)."""
+    body = re.search(r"function renderAdvancedUI\(\) \{(.*?)\n\}", INDEX_HTML, re.S)
+    assert body, "renderAdvancedUI not found"
+    src = body.group(1)
+    assert "addEntityBtn').disabled" in src and "addTableBtn').disabled" in src
+
+
+def test_ui_javascript_parses():
+    """A syntax error in index.html is invisible to every other test here —
+    they only regex the source — and turns the whole page into a blank
+    screen. Parse it for real when a JS engine is available."""
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("no node available to parse the page")
+    script = INDEX_HTML[INDEX_HTML.rindex("<script>") + len("<script>"):
+                        INDEX_HTML.rindex("</script>")]
+    proc = subprocess.run([node, "--check", "-"], input=script, text=True,
+                          capture_output=True)
+    assert proc.returncode == 0, f"index.html script does not parse:\n{proc.stderr}"

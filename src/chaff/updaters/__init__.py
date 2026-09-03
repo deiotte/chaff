@@ -21,12 +21,21 @@ UpdaterFn = Callable[["EntityContext", dict, dict], None]
 
 _REGISTRY: dict[str, UpdaterFn] = {}
 
+# Concrete params example per updater, so a UI can show the shape an updater
+# expects instead of guessing. Mirrors the generator registry's `example=`
+# (INV-4: the updater carries its own example — no UI hardcoding).
+_EXAMPLES: dict[str, dict[str, Any]] = {}
 
-def updater(updater_id: str) -> Callable[[UpdaterFn], UpdaterFn]:
+
+def updater(
+    updater_id: str, *, example: dict[str, Any] | None = None
+) -> Callable[[UpdaterFn], UpdaterFn]:
     def deco(fn: UpdaterFn) -> UpdaterFn:
         if updater_id in _REGISTRY:
             raise ValueError(f"updater '{updater_id}' already registered")
         _REGISTRY[updater_id] = fn
+        if example is not None:
+            _EXAMPLES[updater_id] = example
         return fn
     return deco
 
@@ -44,6 +53,14 @@ def list_updaters() -> list[str]:
     return sorted(_REGISTRY)
 
 
+def list_updater_examples() -> dict[str, dict[str, Any]]:
+    """updater_id -> concrete params example, for every updater that
+    registered one. The UI renders these when you pick an updater, so the
+    required params (`lifecycle` needs `column` + `transitions`) are visible
+    instead of guessed at."""
+    return dict(_EXAMPLES)
+
+
 @dataclass
 class EntityContext:
     """Per-tick context handed to every updater call. Distinct from
@@ -58,7 +75,8 @@ class EntityContext:
 
 # ── Movement (tracks that move) ──────────────────────────────────────
 
-@updater("movement")
+@updater("movement", example={"lat_column": "lat", "lon_column": "lon",
+                              "speed": 0.01, "turn_stddev": 15})
 def movement(ctx: EntityContext, state: dict, p: dict) -> None:
     """Advance a lat/lon position by one step along a drifting heading.
 
@@ -84,7 +102,9 @@ def movement(ctx: EntityContext, state: dict, p: dict) -> None:
 
 # ── Lifecycle (states that transition) ───────────────────────────────
 
-@updater("lifecycle")
+@updater("lifecycle", example={"column": "status",
+                               "transitions": {"placed": {"shipped": 0.9, "placed": 0.1},
+                                               "shipped": {"delivered": 0.85, "returned": 0.15}}})
 def lifecycle(ctx: EntityContext, state: dict, p: dict) -> None:
     """Advance a state column via weighted transitions.
 
@@ -108,7 +128,7 @@ def lifecycle(ctx: EntityContext, state: dict, p: dict) -> None:
 
 # ── Drift (sensor random walk) ───────────────────────────────────────
 
-@updater("drift")
+@updater("drift", example={"column": "reading", "stddev": 1.0, "precision": 2})
 def drift(ctx: EntityContext, state: dict, p: dict) -> None:
     """Random-walk a numeric column (sensor drift).
 

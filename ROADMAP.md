@@ -180,14 +180,30 @@ about new generation features.
       header (uvicorn refused it — a dropped connection, not an injection),
       and a spec setting both `entity` and `tables` was accepted then crashed
       in generation; it's now rejected at load.
-- [ ] **Entity + related-table editors in the UI.** The Advanced panel is
-      read-only: Joe can carry, see and remove an entity/table config, but
-      only the CLI or the NL drafter can author one. The editors are the
-      natural next chunk now that the round-trip is safe.
-- [ ] **A JS test runner.** The round-trip guard asserts on the UI *source*
-      (`tests/test_spec_roundtrip.py`) because CI has no way to execute the
-      page. It catches this bug's return (verified by mutation) but is coarse
-      and breaks on restructuring. A browser-driven test is the real answer.
+- [x] **Entity + related-table editors in the UI (ADR-0021).** ADR-0020's
+      panel was read-only, so authoring either mode still meant hand-written
+      JSON and the CLI. Both are now editable in the page: the entity editor
+      covers count/ticks/id/tick columns plus per-tick update rules (with a
+      live "N rows = entities × ticks" note), and each related table gets a
+      name, a row count and its own full column editor — the same widget the
+      primary table uses, so generators, params examples and the derived
+      formula builder all work inside a related table. Update rules and their
+      params now come from the registry (`@updater(example=...)`,
+      `list_updater_examples()`, served via `/registry`) — INV-4, no updater
+      id hardcoded in the UI. The entity/tables exclusivity from ADR-0020 is
+      enforced by disabling the other button rather than 422-ing after the
+      work is done. Column helpers (`addColumn`, `buildColumns`,
+      `columnsBefore`) are now per-table; `columnsBefore` previously scanned
+      the whole page, which would have offered one table's columns to
+      another's derived column. Verified in a real browser: both modes built
+      from scratch and edited from presets, FK integrity intact.
+- [ ] **A JS test runner.** The round-trip and editor guards assert on the UI
+      *source* (`tests/test_spec_roundtrip.py`) because CI has no way to
+      execute the page. Every assertion is mutation-tested, and a
+      `node --check` test now parses the script for real (skipped when no JS
+      engine is present) — but source assertions stay coarse and break on
+      restructuring. A browser-driven test is still the real answer:
+      Playwright + the pre-installed Chromium already drive this UI locally.
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)

@@ -67,6 +67,21 @@
   .preview-table-name { margin:14px 0 6px; font-size:12px; font-weight:600;
                         text-transform:uppercase; letter-spacing:.04em; color:#555; }
   .preview-table-name:first-child { margin-top:0; }
+  .adv-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .adv-label { font-size:12px; color:var(--muted); }
+  .adv-add { padding:7px 13px; }
+  .adv-add:disabled { opacity:.45; cursor:not-allowed; }
+  .adv-box { margin-top:12px; border:1px solid var(--line); border-radius:9px;
+             padding:13px 14px; background:#fbfcfd; }
+  .adv-box > h3 { margin:0 0 10px; font-size:12px; text-transform:uppercase;
+                  letter-spacing:.6px; color:var(--muted);
+                  display:flex; align-items:center; gap:8px; }
+  .adv-box > h3 .grow { flex:1; }
+  .adv-box .row5 { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; }
+  .adv-note { color:var(--muted); font-size:12px; margin:9px 0 0; }
+  .upd { display:grid; grid-template-columns:1.2fr 3fr 32px; gap:10px;
+         align-items:end; margin-top:8px; }
+  .tbl-head { display:grid; grid-template-columns:2fr 1fr 32px; gap:10px; align-items:end; }
   .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px; }
   .spec-card { text-align:left; border:1px solid var(--line); border-radius:9px; padding:11px 12px;
                background:#fff; cursor:pointer; font:inherit; color:inherit; transition:border-color .12s; }
@@ -156,9 +171,6 @@
       <div><label>Rows</label><input id="rows" type="number" min="1" value="100"></div>
       <div><label>Seed (optional, for repeatable output)</label><input id="seed" type="number" placeholder="e.g. 1337"></div>
     </div>
-    <!-- Populated by renderAdvanced() when the loaded spec carries an entity
-         (ADR-0009) or related tables (ADR-0008). Hidden for plain specs. -->
-    <div id="advanced" class="advanced" style="display:none"></div>
   </section>
 
   <section class="card">
@@ -169,6 +181,22 @@
     <div id="cols"></div>
     <button class="btn ghost mini" id="addCol" style="margin-top:6px;padding:8px 14px">+ Add column</button>
     <p class="hint" id="genHint"></p>
+
+    <!-- Entity (ADR-0009) and related tables (ADR-0008): the two spec modes
+         the flat column form can't express. Placed after the primary table's
+         own columns so the page reads primary-then-related. Mutually
+         exclusive — the engine takes the multi-table path and never reads
+         `entity`, so the spec contract rejects both at once (ADR-0020). -->
+    <div class="advanced">
+      <div class="adv-bar">
+        <span class="adv-label">Add to this dataset</span>
+        <button class="btn ghost mini adv-add" id="addEntityBtn">+ Time series</button>
+        <button class="btn ghost mini adv-add" id="addTableBtn">+ Related table</button>
+        <span class="hint" id="advHint"></span>
+      </div>
+      <div id="entityEditor" style="display:none"></div>
+      <div id="tablesEditor"></div>
+    </div>
   </section>
 
   <div class="tabs">
@@ -259,6 +287,9 @@ let GEN_GROUPS = [];
 // gen_id -> params example {…}, straight from the registry (INV-4). Drives the
 // params-field placeholder so each generator shows the exact shape it expects.
 let GEN_EXAMPLES = {};
+// Entity update rules + their params shapes (ADR-0009), same source of truth.
+let UPDATERS = [];
+let UPD_EXAMPLES = {};
 
 // Populate dropdowns from the live registry — never hardcode (INV-4).
 async function loadRegistry() {
@@ -266,6 +297,8 @@ async function loadRegistry() {
   const reg = await r.json();
   GENERATORS = reg.generators;
   GEN_EXAMPLES = reg.generator_examples || {};
+  UPDATERS = reg.updaters || [];
+  UPD_EXAMPLES = reg.updater_examples || {};
   // Grouped for the dropdown; fall back to one flat group for older servers.
   GEN_GROUPS = reg.generator_groups || [{ group: '', generators: reg.generators }];
   const fmt = $('format');
@@ -318,8 +351,12 @@ let _fxSeq = 0;
 const FX_OPS = [['+', '+'], ['-', '−'], ['*', '×'], ['/', '÷'],
                 ['>', '>'], ['<', '<'], ['>=', '≥'], ['<=', '≤'], ['==', '='], ['!=', '≠']];
 
+// Columns declared before this one *in the same table*. Scoped to the
+// containing list on purpose: a derived column may only reference columns of
+// its own table, and the engine validates exactly that (spec.py). Scanning
+// every .col on the page would offer table B's columns to table A.
 function columnsBefore(colDiv) {
-  const cols = [...document.querySelectorAll('.col')];
+  const cols = [...colDiv.parentElement.querySelectorAll('.col')];
   return cols.slice(0, cols.indexOf(colDiv))
     .map(c => c.querySelector('.c-name').value.trim()).filter(Boolean);
 }
@@ -424,7 +461,8 @@ function updateColMode(colDiv, sel, par) {
   }
 }
 
-function addColumn(name = '', generator = '', params = null, nullRate = 0) {
+function addColumn(name = '', generator = '', params = null, nullRate = 0,
+                   container = $('cols')) {
   const div = document.createElement('div');
   div.className = 'col';
   div.innerHTML =
@@ -440,8 +478,9 @@ function addColumn(name = '', generator = '', params = null, nullRate = 0) {
   div.querySelector('.c-null').value = nullRate || 0;
   div.querySelector('.x').onclick = () => div.remove();
   sel.onchange = () => updateColMode(div, sel, par);
-  $('cols').appendChild(div);
+  container.appendChild(div);
   updateColMode(div, sel, par);  // in DOM now, so columnsBefore() works
+  return div;
 }
 
 // Reverse of buildSpec: hydrate the form from a loaded/preset spec.
@@ -460,57 +499,202 @@ function loadSpecIntoForm(spec) {
   $('cols').innerHTML = '';
   (spec.columns || []).forEach(c => addColumn(c.name, c.generator, c.params, c.null_rate));
   advanced = { entity: spec.entity || null, tables: spec.tables || null };
-  renderAdvanced();
+  renderAdvancedUI();
   setMsg(`Loaded "${spec.name}"`, 'ok');
 }
 
-// Show what's attached to the spec beyond the column list, and let it be
-// dropped. Read-only by design: a full editor is a bigger piece of work, but
-// Joe must at least be able to SEE why he's getting 300 rows from 10 entities,
-// and be able to get back to a plain flat table without reloading the page.
-function renderAdvanced() {
-  const el = $('advanced');
-  const bits = [];
-  if (advanced.entity) {
-    const e = advanced.entity;
-    const updaters = (e.updates || []).map(u => u.updater).join(', ') || 'none';
-    bits.push(`<div class="adv-item">
-      <div><b>Time series</b> — ${esc(e.count)} entities × ${esc(e.ticks)} ticks
-      = <b>${esc(e.count * e.ticks)} rows</b>
-      <div class="adv-meta">id: <code>${esc(e.id_column)}</code> ·
-        tick: <code>${esc(e.tick_column)}</code> · updates: ${esc(updaters)}</div></div>
-      <button class="btn ghost" onclick="dropAdvanced('entity')">Remove</button>
-    </div>`);
-  }
-  if (advanced.tables) {
-    const names = advanced.tables.map(t => `${esc(t.name)} (${esc(t.rows)})`).join(', ');
-    bits.push(`<div class="adv-item">
-      <div><b>Related tables</b> — downloads as a .zip, one file per table
-      <div class="adv-meta">${esc($('name').value || 'primary')} (primary), ${names}</div></div>
-      <button class="btn ghost" onclick="dropAdvanced('tables')">Remove</button>
-    </div>`);
-  }
-  el.innerHTML = bits.join('');
-  el.style.display = bits.length ? 'block' : 'none';
+// ── Entity + related-table editors (ADR-0009 / ADR-0008) ─────────────
+// The flat column form can't express either mode, so each gets its own
+// editor here. They are mutually exclusive: the engine takes the
+// multi-table path and never reads `entity`, so the spec contract rejects
+// a spec carrying both — the UI enforces the same rule up front rather
+// than letting the server 422 after the fact.
 
-  const rowsBox = $('rows');
-  rowsBox.disabled = !!advanced.entity;
-  rowsBox.title = advanced.entity
-    ? 'Not used: this spec\'s length is entities × ticks.' : '';
-  rowsBox.style.opacity = advanced.entity ? 0.5 : 1;
+function entityEnabled() { return !!advanced.entity; }
+function tablesEnabled() { return !!(advanced.tables && advanced.tables.length); }
+
+const BLANK_ENTITY = { count: 10, ticks: 30, id_column: 'entity_id',
+                       id_pattern: '', tick_column: 'tick', updates: [] };
+
+function updaterOptions(selected) {
+  return UPDATERS.map(u =>
+    `<option value="${esc(u)}"${u === selected ? ' selected' : ''}>${esc(u)}</option>`).join('');
 }
 
-function dropAdvanced(key) {
-  advanced[key] = null;
-  renderAdvanced();
-  setMsg(key === 'entity'
-    ? 'Time series removed — this is a flat table now.'
-    : 'Related tables removed — only the primary table will be generated.', 'ok');
+// Params default to the updater's own registered example (INV-4: the shape
+// comes from the registry, never hardcoded here).
+function updaterParamsText(updaterId, params) {
+  if (params && Object.keys(params).length) return JSON.stringify(params);
+  const ex = UPD_EXAMPLES[updaterId];
+  return ex ? JSON.stringify(ex) : '';
+}
+
+function addUpdateRow(updaterId, params, container) {
+  const div = document.createElement('div');
+  div.className = 'upd';
+  div.innerHTML =
+    `<div><label>Rule</label><select class="u-id">${updaterOptions(updaterId)}</select></div>
+     <div><label>Params (JSON)</label><textarea class="u-params" rows="1"></textarea></div>
+     <button class="x" title="remove">×</button>`;
+  const sel = div.querySelector('.u-id');
+  const par = div.querySelector('.u-params');
+  par.value = updaterParamsText(sel.value, params);
+  // Switching rule swaps in that rule's example, but never clobbers params
+  // the user has already edited away from the previous example.
+  sel.onchange = () => {
+    const prevExample = JSON.stringify(UPD_EXAMPLES[sel.dataset.prev] || {});
+    if (!par.value.trim() || par.value.trim() === prevExample) {
+      par.value = updaterParamsText(sel.value, null);
+    }
+    sel.dataset.prev = sel.value;
+  };
+  sel.dataset.prev = sel.value;
+  div.querySelector('.x').onclick = () => div.remove();
+  container.appendChild(div);
+}
+
+function renderEntityEditor() {
+  const el = $('entityEditor');
+  if (!entityEnabled()) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const e = advanced.entity;
+  el.style.display = 'block';
+  el.innerHTML =
+    `<div class="adv-box">
+       <h3><span class="grow">Time series — entities that change over time</span>
+           <button class="btn ghost mini" id="dropEntity">Remove</button></h3>
+       <div class="row5">
+         <div><label>Entities</label><input id="entCount" type="number" min="1" value="${esc(e.count)}"></div>
+         <div><label>Ticks each</label><input id="entTicks" type="number" min="1" value="${esc(e.ticks)}"></div>
+         <div><label>Id column</label><input id="entIdCol" value="${esc(e.id_column || 'entity_id')}"></div>
+         <div><label>Id pattern</label><input id="entIdPat" placeholder="UNIT-####" value="${esc(e.id_pattern || '')}"></div>
+         <div><label>Tick column</label><input id="entTickCol" value="${esc(e.tick_column || 'tick')}"></div>
+       </div>
+       <p class="adv-note" id="entTotal"></p>
+       <div id="entUpdates"></div>
+       <button class="btn ghost mini" id="addUpdate" style="margin-top:8px;padding:7px 13px">+ Add rule</button>
+       <p class="adv-note">The columns above set each entity's starting state;
+          rules change it every tick. Rows out = entities × ticks, so the Rows
+          box doesn't apply.</p>
+     </div>`;
+  (e.updates || []).forEach(u => addUpdateRow(u.updater, u.params, $('entUpdates')));
+  $('dropEntity').onclick = () => { advanced.entity = null; refreshAdvanced();
+    setMsg('Time series removed — this is a flat table now.', 'ok'); };
+  $('addUpdate').onclick = () => addUpdateRow(null, null, $('entUpdates'));
+  const total = () => {
+    const n = (parseInt($('entCount').value, 10) || 0) * (parseInt($('entTicks').value, 10) || 0);
+    $('entTotal').textContent = `${n.toLocaleString()} rows (entities × ticks)`;
+  };
+  $('entCount').oninput = $('entTicks').oninput = total;
+  total();
+}
+
+function addTableCard(table) {
+  const el = $('tablesEditor');
+  const div = document.createElement('div');
+  div.className = 'adv-box tbl';
+  div.innerHTML =
+    `<h3><span class="grow">Related table</span>
+         <button class="btn ghost mini t-drop">Remove</button></h3>
+     <div class="tbl-head">
+       <div><label>Table name</label><input class="t-name" placeholder="orders"></div>
+       <div><label>Rows</label><input class="t-rows" type="number" min="1" value="100"></div>
+       <div></div>
+     </div>
+     <div class="cols-head" style="margin-top:12px">
+       <span>Name</span><span>Generator</span><span>Params (JSON, optional)</span><span>Null rate</span><span></span>
+     </div>
+     <div class="t-cols"></div>
+     <button class="btn ghost mini t-addcol" style="margin-top:6px;padding:7px 13px">+ Add column</button>
+     <p class="adv-note">Link to another table with the <code>fk</code> generator —
+        params <code>{"table": "...", "column": "..."}</code>. Parents generate first;
+        chaff works out the order.</p>`;
+  div.querySelector('.t-name').value = table.name || '';
+  div.querySelector('.t-rows').value = table.rows || 100;
+  const cols = div.querySelector('.t-cols');
+  div.querySelector('.t-drop').onclick = () => { div.remove(); refreshAdvanced(); };
+  div.querySelector('.t-addcol').onclick = () => addColumn('', '', null, 0, cols);
+  el.appendChild(div);
+  // Append columns after the card is in the DOM so columnsBefore() can walk it.
+  (table.columns || []).forEach(c => addColumn(c.name, c.generator, c.params, c.null_rate, cols));
+  if (!(table.columns || []).length) addColumn('', '', null, 0, cols);
+  return div;
+}
+
+function renderTablesEditor() {
+  const el = $('tablesEditor');
+  el.innerHTML = '';
+  (advanced.tables || []).forEach(addTableCard);
+}
+
+// Read the editors back into `advanced`. The DOM is authoritative while an
+// editor is open, so this runs before every build/save — otherwise a spec
+// would ship the values the editor was opened with, not the edited ones.
+// `validate` is on only for a build (preview/download/save). Re-renders sync
+// too — adding a second table, removing one — and a half-filled card is
+// normal mid-edit; throwing there would break the Remove button.
+function syncAdvancedFromEditors(validate = false) {
+  if (entityEnabled() && $('entCount')) {
+    advanced.entity = {
+      count: parseInt($('entCount').value, 10) || 1,
+      ticks: parseInt($('entTicks').value, 10) || 1,
+      id_column: $('entIdCol').value.trim() || 'entity_id',
+      tick_column: $('entTickCol').value.trim() || 'tick',
+      updates: [...$('entUpdates').querySelectorAll('.upd')].map(u => {
+        const id = u.querySelector('.u-id').value;
+        const raw = u.querySelector('.u-params').value.trim();
+        let params = {};
+        if (raw) {
+          try { params = JSON.parse(raw); }
+          catch (e) { throw new Error(`Rule "${id}": params is not valid JSON.`); }
+        }
+        return { updater: id, params };
+      }),
+    };
+    const pat = $('entIdPat').value.trim();
+    if (pat) advanced.entity.id_pattern = pat;
+  }
+  const cards = [...$('tablesEditor').querySelectorAll('.tbl')];
+  advanced.tables = cards.length ? cards.map((c, i) => {
+    const name = c.querySelector('.t-name').value.trim();
+    const columns = buildColumns(c.querySelector('.t-cols'));
+    // Catch these here: the server's validation error for them is accurate
+    // but cryptic ("String should have at least 1 character"), and the user
+    // can't tell which of several tables it means.
+    if (validate) {
+      if (!name) throw new Error(`Related table #${i + 1} needs a name.`);
+      if (!columns.length) throw new Error(`Related table "${name}" needs at least one column.`);
+    }
+    return { name, rows: parseInt(c.querySelector('.t-rows').value, 10) || 1, columns };
+  }) : null;
+}
+
+// Re-render both editors and reconcile the add buttons with the exclusivity
+// rule, so the disallowed combination can't be built in the first place.
+function refreshAdvanced() {
+  syncAdvancedFromEditors();
+  renderAdvancedUI();
+}
+
+// Render-only: used after `advanced` is replaced wholesale (loading a spec),
+// where syncing first would read back the editors' pre-load values.
+function renderAdvancedUI() {
+  renderEntityEditor();
+  renderTablesEditor();
+  const ent = entityEnabled(), tbl = tablesEnabled();
+  $('addEntityBtn').disabled = ent || tbl;
+  $('addTableBtn').disabled = ent;
+  $('advHint').textContent =
+    ent ? 'A time-series spec can\'t also have related tables.'
+    : tbl ? 'A multi-table spec can\'t also be a time series.' : '';
+  const rowsBox = $('rows');
+  rowsBox.disabled = ent;
+  rowsBox.title = ent ? 'Not used: this spec\'s length is entities × ticks.' : '';
+  rowsBox.style.opacity = ent ? 0.5 : 1;
 }
 
 // The columns table — shared by the Batch and Stream tabs (one spec, INV-1).
-function buildColumns() {
-  return [...document.querySelectorAll('.col')].map(c => {
+function buildColumns(container = $('cols')) {
+  return [...container.querySelectorAll('.col')].map(c => {
     const name = c.querySelector('.c-name').value.trim();
     const generator = c.querySelector('.c-gen').value;
     const raw = c.querySelector('.c-params').value.trim();
@@ -531,6 +715,7 @@ function buildColumns() {
 // The shared dataset skeleton (name/rows/seed/columns); each tab supplies its
 // own output format and sink. The UI only builds specs (INV-1).
 function baseSpec(format) {
+  syncAdvancedFromEditors(true);   // editors are authoritative; emit what's on screen
   const seedRaw = $('seed').value.trim();
   const spec = {
     name: $('name').value.trim() || 'dataset',
@@ -930,6 +1115,20 @@ function stopPushJob(id) { fetch('/stream/jobs/' + id, { method: 'DELETE', heade
 
 // ── Wiring ───────────────────────────────────────────────────────
 $('addCol').onclick = () => addColumn();
+$('addEntityBtn').onclick = () => {
+  advanced.entity = { ...BLANK_ENTITY, updates: [] };
+  renderAdvancedUI();
+  setMsg('Time series added — set entities × ticks and add a rule.', 'ok');
+};
+$('addTableBtn').onclick = () => {
+  // Sync first so edits already on screen survive the re-render, then append
+  // the blank table to *state* — appending to the DOM instead would be wiped
+  // by the re-render, which rebuilds the list from `advanced.tables`.
+  syncAdvancedFromEditors();
+  advanced.tables = [...(advanced.tables || []), { name: '', rows: 100, columns: [] }];
+  renderAdvancedUI();
+  setMsg('Related table added — name it and add columns.', 'ok');
+};
 $('previewBtn').onclick = doPreview;
 $('downloadBtn').onclick = doDownload;
 $('saveBtn').onclick = saveToLibrary;
@@ -944,7 +1143,7 @@ $('nlProvider').onchange = saveKey;
 $('strToken').value = localStorage.getItem('chaff_stream_token') || '';
 $('strToken').onchange = () => localStorage.setItem('chaff_stream_token', streamToken());
 loadKey();
-loadRegistry();
+loadRegistry().then(renderAdvancedUI);
 refreshLibrary();
 renderDeliveryPicker();
 renderSinkFields();

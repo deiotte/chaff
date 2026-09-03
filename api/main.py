@@ -42,7 +42,7 @@ from chaff.generators import (
 )
 from chaff.sinks import list_sinks
 from chaff.spec import DatasetSpec, load_spec
-from chaff.updaters import list_updaters
+from chaff.updaters import list_updater_examples, list_updaters
 
 app = FastAPI(title="chaff", version=__version__)
 
@@ -96,6 +96,7 @@ def registry():
         "formats": list_formats(),
         "sinks": list_sinks(),
         "updaters": list_updaters(),
+        "updater_examples": list_updater_examples(),  # params shape per updater
     }
 
 
