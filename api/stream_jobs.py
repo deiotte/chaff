@@ -37,6 +37,12 @@ class StreamJobError(ValueError):
     a destination egress policy forbids (SSRF guard, ADR-0018)."""
 
 
+class TooManyJobs(StreamJobError):
+    """The active-job cap is full (ADR-0029). Distinct from `StreamJobError`
+    because the request isn't wrong — it's early. The API answers 429 so a
+    client knows to retry rather than to fix the spec."""
+
+
 def _ceiling_records() -> int:
     try:
         return int(os.environ.get("CHAFF_STREAM_MAX_RECORDS", 1_000_000))
@@ -49,6 +55,22 @@ def _ceiling_seconds() -> float:
         return float(os.environ.get("CHAFF_STREAM_MAX_SECONDS", 300))
     except ValueError:
         return 300.0
+
+
+#: How many jobs may run at once (ADR-0029). Every active job owns an OS
+#: thread and a socket, and the existing caps bound each job's *length*, not
+#: how many start — 70 concurrent jobs were launched with no refusal. Eight
+#: leaves room for the several feeds a real demo runs (a broker, a TAK feed,
+#: an HTTP endpoint) while keeping the ceiling somewhere a person chose.
+DEFAULT_MAX_ACTIVE_JOBS = 8
+
+
+def _max_active_jobs() -> int:
+    try:
+        return int(os.environ.get("CHAFF_STREAM_MAX_ACTIVE_JOBS",
+                                  DEFAULT_MAX_ACTIVE_JOBS))
+    except ValueError:
+        return DEFAULT_MAX_ACTIVE_JOBS
 
 
 @dataclass
@@ -141,11 +163,28 @@ def start_job(spec: DatasetSpec, *, max_records, max_seconds, rate=None) -> Stre
         id=uuid.uuid4().hex[:12], sink=sink_id, destination=_destination_label(spec),
         max_records=max_records, max_seconds=max_seconds,
         rate=(float(rate) if rate else None), started_at=time.monotonic())
+    # Admission and registration share one lock hold. Counting first and
+    # inserting afterwards would let N simultaneous requests all read the same
+    # under-cap count and all be admitted — the cap has to be indivisible to
+    # be a cap at all.
     with _LOCK:
+        active = sum(1 for j in _JOBS.values() if j.status == "running")
+        cap = _max_active_jobs()
+        if active >= cap:
+            raise TooManyJobs(
+                f"{active} of {cap} stream jobs are already running. Stop one "
+                "first, or raise CHAFF_STREAM_MAX_ACTIVE_JOBS.")
         _JOBS[job.id] = job
         _prune_locked()
     threading.Thread(target=_run_job, args=(job, spec), daemon=True).start()
     return job
+
+
+def active_job_count() -> int:
+    """How many jobs are running right now. Used by the status endpoint and
+    the tests; kept here so nothing else has to know how `running` is spelled."""
+    with _LOCK:
+        return sum(1 for j in _JOBS.values() if j.status == "running")
 
 
 def _run_job(job: StreamJob, spec: DatasetSpec) -> None:

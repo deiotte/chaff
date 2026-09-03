@@ -44,13 +44,120 @@ _FUNCS = {
     "round": round, "min": min, "max": max, "abs": abs, "len": len,
     "int": int, "float": float, "str": str, "bool": bool,
 }
-# Guard against pathological blowups like 9 ** 9 ** 9 tying up the process.
+# ── Cost budget (ADR-0029) ───────────────────────────────────────────
+# A formula is the one place a spec can turn a small input into a large
+# output: `note * 1000000` builds a megabyte from one cell, and it does it
+# once *per row*. Bounding the exponent alone was not enough — the exponent
+# guard is per-node, so `(10 ** 1000) ** 1000` walks straight past it, and
+# repetition (`*`) and concatenation (`+`) were never bounded at all.
+
+#: Longest formula accepted. Parsing is itself work, and no legible formula
+#: comes close; a 1 MB formula string is an amplification vector on its own.
+_MAX_EXPR_CHARS = 2000
+
+#: Guard against pathological blowups like 9 ** 9 ** 9 tying up the process.
 _MAX_POW_EXP = 1000
+
+#: Ceiling on the measured size of any intermediate value. A derived cell is
+#: a demo field, not a payload: 100 KB is far past anything legible and far
+#: below anything that hurts. Applied to intermediates, not just the result,
+#: so a large value can never be built and then discarded.
+_MAX_VALUE_SIZE = 100_000
+
+#: Ceiling on integer magnitude, in bits. Python itself refuses to render an
+#: int beyond ~4300 digits, so anything larger cannot reach a dataset anyway —
+#: it can only burn CPU and memory on the way to being unusable.
+_MAX_INT_BITS = 8192
+
+
+def _size(value: Any) -> int:
+    """Measured size of a value, counting nested structure.
+
+    `len` alone is not a budget: `[[x] * 1000] * 1000` has a length of 1000
+    and a million elements, and nesting that twice more is a gigabyte. So a
+    sequence is charged for its own length *plus* the size of everything in
+    it, which is what makes the repetition product bounded rather than just
+    the outermost repeat. Recursion is safe because every intermediate has
+    already been checked against `_MAX_VALUE_SIZE`.
+    """
+    if isinstance(value, str):
+        return len(value)
+    if isinstance(value, (list, tuple)):
+        return len(value) + sum(_size(v) for v in value)
+    if isinstance(value, bool):
+        return 1
+    if isinstance(value, int):
+        return max(1, value.bit_length() // 8)
+    return 1
+
+
+def _too_big(predicted: int, what: str) -> FormulaError:
+    return FormulaError(
+        f"formula would build {what} of about {predicted:,} units, over the "
+        f"{_MAX_VALUE_SIZE:,} limit for one value. A derived column is a field, "
+        "not a payload — reduce the repetition.")
+
+
+def _guard_binop(op: type, left: Any, right: Any) -> None:
+    """Refuse an operation whose result would blow the budget, *before* it runs.
+
+    Checking the result afterwards would mean allocating the megabyte first,
+    which is most of the damage. Every amplifying operator has a size that can
+    be predicted from its operands, so none of them needs to be evaluated to
+    be judged.
+    """
+    if op is ast.Mult:
+        for seq, n in ((left, right), (right, left)):
+            if isinstance(seq, (str, list, tuple)) and isinstance(n, int) \
+                    and not isinstance(n, bool) and n > 0:
+                predicted = _size(seq) * n
+                if predicted > _MAX_VALUE_SIZE:
+                    raise _too_big(predicted, "a repeated value")
+    elif op is ast.Add:
+        # Test the operands against the base types, not against `type(left)`:
+        # a str *subclass* on one side would make `isinstance(right, type(left))`
+        # false and skip the check entirely.
+        both_text = isinstance(left, str) and isinstance(right, str)
+        both_seq = (isinstance(left, (list, tuple))
+                    and isinstance(right, (list, tuple)))
+        if both_text or both_seq:
+            predicted = _size(left) + _size(right)
+            if predicted > _MAX_VALUE_SIZE:
+                raise _too_big(predicted, "a joined value")
+    elif op is ast.Mod:
+        # `"%1000000d" % 5` is a megabyte, and the width lives inside a format
+        # string, so unlike the operators above there is nothing to predict
+        # from the operands' sizes. printf formatting has no documented use in
+        # a derived column; numeric modulo (`id % 10`) is the real one and is
+        # untouched. Found by the backstop below, which caught it only after
+        # allocating 100 MB — which is most of the damage.
+        if isinstance(left, str):
+            raise FormulaError(
+                "'%' on text is string formatting, which isn't supported in a "
+                "formula (it can build an arbitrarily large value). Use + to "
+                "join text; % on numbers still works.")
+    elif op is ast.Pow:
+        if isinstance(right, (int, float)) and right > _MAX_POW_EXP:
+            raise FormulaError(f"exponent too large (>{_MAX_POW_EXP})")
+        # The exponent check above is per-node, so a chained power slips past
+        # it: (10 ** 1000) ** 1000 has an exponent of exactly 1000 at each
+        # step and a result of 10**1000000. Predicting the width closes that.
+        if isinstance(left, int) and isinstance(right, int) \
+                and not isinstance(left, bool) and right > 0:
+            if left.bit_length() * right > _MAX_INT_BITS:
+                raise FormulaError(
+                    f"formula would build a number of about "
+                    f"{left.bit_length() * right:,} bits, over the "
+                    f"{_MAX_INT_BITS:,}-bit limit for one value.")
 
 
 def _parse(expr: str) -> ast.Expression:
     if not isinstance(expr, str) or not expr.strip():
         raise FormulaError("formula is empty")
+    if len(expr) > _MAX_EXPR_CHARS:
+        raise FormulaError(
+            f"formula is {len(expr):,} characters, over the {_MAX_EXPR_CHARS:,} "
+            "limit. A derived column is a one-line calculation.")
     try:
         return ast.parse(expr, mode="eval")
     except SyntaxError as e:
@@ -130,9 +237,15 @@ def _ev(node: ast.AST, names: dict[str, Any]) -> Any:
         return names[node.id]
     if isinstance(node, ast.BinOp):
         left, right = _ev(node.left, names), _ev(node.right, names)
-        if isinstance(node.op, ast.Pow) and isinstance(right, (int, float)) and right > _MAX_POW_EXP:
-            raise FormulaError(f"exponent too large (>{_MAX_POW_EXP})")
-        return _BIN_OPS[type(node.op)](left, right)
+        op = type(node.op)
+        _guard_binop(op, left, right)
+        result = _BIN_OPS[op](left, right)
+        # Backstop: the predictions above cover every operator that can
+        # amplify, but a guard is worth more when it doesn't depend on having
+        # enumerated them correctly.
+        if _size(result) > _MAX_VALUE_SIZE:
+            raise _too_big(_size(result), "a value")
+        return result
     if isinstance(node, ast.UnaryOp):
         return _UNARY_OPS[type(node.op)](_ev(node.operand, names))
     if isinstance(node, ast.BoolOp):

@@ -548,6 +548,10 @@ def stream_job_start(req: StreamJobRequest):
     try:
         job = stream_jobs.start_job(req.spec, max_records=req.max_records,
                                     max_seconds=req.max_seconds, rate=req.rate)
+    except stream_jobs.TooManyJobs as e:
+        # 429, not 422: the spec is fine, the server is busy. The distinction
+        # is what tells a client to retry rather than to edit and resubmit.
+        raise HTTPException(status_code=429, detail=str(e))
     except stream_jobs.StreamJobError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return job.public()

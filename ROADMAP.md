@@ -310,8 +310,28 @@ unless a specific claim fails to reproduce.
       substring match would have flagged it.
       **Residual, not fixable by reading:** a credential already saved is
       still in the file, in backups and in git history. Rotate it.
-- [ ] **F-09 No cost budget or active-job cap**: `expr: a * 1000000` yields a
-      1 MB field from one row; 70 concurrent stream jobs started locally.
+- [x] **F-09 No cost budget or active-job cap (ADR-0029).** Two shapes of one
+      thing: a cheap input buying expensive work. A derived formula built
+      100 MB from one cell in 441 ms — and it does that *per row*, so the
+      100,000-row API cap was no help (a 100-row preview would be 10 GB). The
+      multiplier could come from a column, so the spec carried no suspicious
+      literal, and the exponent guard was per-node, so `(10 ** 1000) ** 1000`
+      walked through it. Now every amplifying operator is judged from its
+      operands *before* it runs — refusals cost ~0 ms and allocate nothing —
+      and size counts nesting, since `[[x] * 1000] * 1000` has a length of
+      1000 and a million elements. Separately, `start_job` never counted
+      running jobs (the existing ceilings bound each job's *length*, not how
+      many start): 70 launched, 70 threads, no refusal. Now capped at 8
+      (`CHAFF_STREAM_MAX_ACTIVE_JOBS`) with the count and insert under one
+      lock hold, so 70 simultaneous starts admit exactly 8, answering **429**
+      — the spec is fine, the server is busy.
+      **Worth recording:** the backstop found the `%`-on-text amplifier
+      (`"%1000000d" % 5` is a megabyte), not the design. The enumeration of
+      amplifying operators was wrong, which is the argument for a check that
+      doesn't depend on the enumeration being right.
+      **Residual:** a sink hung on a socket still holds its slot (`max_seconds`
+      bounds the generator, not the sink); the budget is per value, not a
+      whole-run byte accounting; nothing here rate-limits requests.
 - [ ] **F-10 `/draft` is unauthenticated**, so provider quota is spendable by
       any caller.
 - [ ] **F-11 Release workflows trigger on `pull_request` and consume signing
