@@ -317,8 +317,32 @@ unless a specific claim fails to reproduce.
 - [ ] **F-11 Release workflows trigger on `pull_request` and consume signing
       secrets when present**; actions use floating tags and the base image is
       unpinned.
-- [ ] **F-07 CSV/XLSX formula injection** and **F-08 T-SQL `]` not escaped** —
-      both confirmed; output-injection, impact lands on the consumer.
+- [x] **F-07/F-08 Output injection into spreadsheets and SQL (ADR-0028).**
+      `=HYPERLINK(...)` reached CSV as a live formula and .xlsx as a real
+      formula cell; a dataset named `x]; DROP TABLE audit;--` closed its own
+      T-SQL bracket. Neither can hurt chaff — the impact lands on whoever
+      *opens* the file — and both are reachable because a spec is shareable.
+      The blanket OWASP fix was rejected on measurement, not taste: 131 of
+      52,658 generated strings start with a formula lead and every one is a
+      phone number, so prefixing them all writes `'+1-289-253-5482x18761`
+      into the CRM preset. The guard instead asks whether a value can reach
+      *outside its own cell* (function call, DDE pipe, sheet reference, UNC
+      path); `formula_guard: strict|off` covers the other two intents and an
+      unknown mode raises rather than silently defaulting. .xlsx is fixed
+      losslessly by typing the cell as a string, so there the guard is
+      invisible. SQL identifiers now escape their own delimiter (`]]`, `""`)
+      rather than restricting names, since columns are permissive by design.
+      **Residual:** under `smart`, `+1+1` still evaluates as inert arithmetic;
+      `strict` removes even that.
+- [x] **Entity specs lost their id and tick columns** (found while fixing
+      F-07, ADR-0028 appendix). `chaff generate examples/order_lifecycle.json`
+      crashed on `main`, and the same spec in SQL *silently* emitted
+      `status, amount` only — 1,200 snapshots with no entity and no time.
+      Column-oriented encoders read `spec.columns`, which never declares what
+      the engine adds; row-oriented ones dump the row dict and were fine.
+      `make check` validates the presets but never generates one, so it read
+      green throughout. Fixed with `engine.encode_view()`, and a test now
+      generates and encodes every example spec in its declared format.
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)

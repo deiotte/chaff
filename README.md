@@ -185,6 +185,19 @@ docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink
   real thing. See `examples/web_access_logs.json`, `examples/employees.json`.
 - **Seeded** (ADR-0004): same spec + seed = byte-identical dataset. When the
   demo works, you can have that exact data again.
+- **Safe to hand to a colleague** (ADR-0028): a spec is a shareable document,
+  so chaff treats what it writes as untrusted input to whatever opens it. A
+  value like `=HYPERLINK(...)` is neutralized before it reaches a CSV or an
+  `.xlsx`, and SQL identifiers escape their own delimiter so a column name can
+  never become a statement. The guard is deliberately narrow: it escapes what
+  could reach *outside its own cell*, so **phone numbers like `+1-555-0100`
+  come through untouched** — a security default that mangled the CRM demo
+  would be its own kind of bug. Set `formula_guard` in `output.options` to
+  `"strict"` (escape every formula lead, phone numbers included) or `"off"`
+  (emit formulas as written). In `.xlsx` the fix is lossless — the cell is
+  typed as text — so nothing is mangled there at all.
+  Generated `.sql` is still a *program*: chaff quotes correctly, but running a
+  `.sql` file built from someone else's spec is running someone else's code.
 - **Spec library**: pick a preset or a saved schema from the UI gallery, load
   it into the builder, tweak, and go. Saves persist under `CHAFF_LIBRARY_DIR`
   (a Docker volume); presets ship in `examples/`.
