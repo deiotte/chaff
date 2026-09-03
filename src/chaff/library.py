@@ -22,6 +22,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .secrets import redact, reject_credentials
 from .spec import DatasetSpec, load_spec
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
@@ -88,28 +89,45 @@ def list_specs() -> list[dict[str, Any]]:
                 data = json.loads(f.read_text())
             except (OSError, json.JSONDecodeError):
                 continue  # skip unreadable/garbage files rather than 500
+            data, _removed = redact(data)
             out.append(_summary(f.stem, source, data))
     return out
 
 
 def load_named(name: str) -> dict[str, Any]:
-    """Return a spec dict by name. A saved schema shadows a preset."""
+    """Return a spec dict by name. A saved schema shadows a preset.
+
+    Credentials are stripped on the way out (ADR-0027). Saving them is
+    refused now, but files written before that rule still exist, and a
+    backup or a support bundle made from them shouldn't hand over a working
+    credential. The removed paths come back as `_redacted` so the caller can
+    say what's missing rather than silently returning a spec that won't
+    connect.
+    """
     _safe(name)
     for directory in (library_dir(), presets_dir()):
         f = directory / f"{name}.json"
         if f.is_file():
-            return json.loads(f.read_text())
+            spec, removed = redact(json.loads(f.read_text()))
+            if removed:
+                spec["_redacted"] = removed
+            return spec
     raise KeyError(f"no spec named '{name}' in the library")
 
 
 def save_named(name: str, spec: dict[str, Any] | DatasetSpec) -> Path:
     """Validate then persist a spec to the writable library directory.
 
-    Only valid specs enter the library — validation happens before any
-    bytes hit disk (the spec is the product).
+    Only valid *and* secret-free specs enter the library — both checks happen
+    before any bytes hit disk (the spec is the product). A saved spec is a
+    shareable document, so a credential in one is a credential handed to
+    everyone who can read the library (ADR-0027).
     """
     _safe(name)
     validated = spec if isinstance(spec, DatasetSpec) else load_spec(spec)
+    # Checked on the validated dump so a DatasetSpec and a raw dict are held
+    # to the same rule.
+    reject_credentials(json.loads(validated.model_dump_json()))
     directory = library_dir()
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{name}.json"

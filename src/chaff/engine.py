@@ -29,6 +29,7 @@ from .sinks import (
     rate_limited,
     time_limited,
 )
+from .secrets import resolve_env
 from .spec import DatasetSpec
 from .updaters import EntityContext, get_updater
 
@@ -305,6 +306,19 @@ def stream_encoded(
 _JENNY = 8675309
 
 
+def _with_resolved_sink_options(spec: DatasetSpec) -> DatasetSpec:
+    """Substitute `${VAR}` in sink options from the environment (ADR-0027).
+
+    Done once here rather than in each sink, so every sink gets it and none
+    has to know the convention. This resolves the sink's *own configuration*,
+    not the payload — encoders and sinks stay as they were (INV-2).
+    """
+    resolved = resolve_env(spec.sink.options)
+    if resolved == spec.sink.options:
+        return spec
+    return spec.model_copy(update={"sink": spec.sink.model_copy(update={"options": resolved})})
+
+
 def run(spec: DatasetSpec) -> str:
     """Full pipeline. Returns the sink's human-readable receipt.
 
@@ -314,6 +328,8 @@ def run(spec: DatasetSpec) -> str:
     not the sink, does the encoding. Multi-table specs (ADR-0008) take the
     per-table path below.
     """
+    spec = _with_resolved_sink_options(spec)
+
     if spec.tables:
         return _run_multi(spec)
 
