@@ -1,4 +1,12 @@
-FROM python:3.12-slim
+# Pinned by digest, not by tag (ADR-0031). A tag is mutable: `python:3.12-slim`
+# can point at different bytes tomorrow, so two builds of the same commit are
+# not the same image. The digest makes the base an input we chose rather than
+# one we inherited.
+#
+# A pin only stays safe if something bumps it — otherwise it freezes an
+# unpatched base in place, which is worse than the mutable tag it replaced.
+# .github/dependabot.yml is that something; do not pin anything here without it.
+FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
 WORKDIR /app
 
 # Which optional extras to bake in. Default = API + streaming sinks (so the

@@ -1,0 +1,37 @@
+# Keeps the pins in this repo from going stale (ADR-0031).
+#
+# Pinning an action to a commit SHA and the base image to a digest is what
+# stops a mutable tag from changing what a build runs. It also stops security
+# updates from arriving on their own, which turns a supply-chain fix into a
+# supply-chain liability the moment everyone forgets. This file is the other
+# half of that decision: Dependabot proposes the bump, CI proves it, a person
+# merges it.
+#
+# Dependabot rewrites a pinned `uses:` SHA and updates the trailing `# vN`
+# comment with it, so pins stay both immutable and current.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
