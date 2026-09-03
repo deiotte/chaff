@@ -298,8 +298,18 @@ unless a specific claim fails to reproduce.
       chaff is a network service rather than a local tool. **Deliberately not
       blanket default-deny:** pushing demo data to your own `localhost:9092` or
       `kafka:9092` is the feature, and tests assert the local demo still works.
-- [ ] **F-05 Saved specs store sink credentials in clear JSON** — bearer
-      tokens round-trip through `/library` verbatim.
+- [x] **F-05 Saved specs stored sink credentials in clear JSON (ADR-0027).**
+      A bearer token round-tripped through `/library` verbatim. Saving a spec
+      with a literal secret is now refused before any bytes hit disk, with an
+      error naming the field and the replacement; `"${MY_SINK_TOKEN}"` is
+      resolved from the environment at run time so an authenticated sink stays
+      expressible (refusing without an alternative would have removed a
+      feature). Reads strip secrets from files written before the rule and
+      report the paths so the UI can tell the user to rotate. Curated field
+      list, not a heuristic — Kafka's `options.key` is a *message* key and a
+      substring match would have flagged it.
+      **Residual, not fixable by reading:** a credential already saved is
+      still in the file, in backups and in git history. Rotate it.
 - [ ] **F-09 No cost budget or active-job cap**: `expr: a * 1000000` yields a
       1 MB field from one row; 70 concurrent stream jobs started locally.
 - [ ] **F-10 `/draft` is unauthenticated**, so provider quota is spendable by

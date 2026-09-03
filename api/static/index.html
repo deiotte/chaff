@@ -546,6 +546,15 @@ function loadSpecIntoForm(spec) {
   (spec.columns || []).forEach(c => addColumn(c.name, c.generator, c.params, c.null_rate));
   advanced = { entity: spec.entity || null, tables: spec.tables || null };
   renderAdvancedUI();
+  // A spec saved before ADR-0027 can still hold a credential on disk. It is
+  // stripped on the way out, so say so — otherwise the sink just fails later
+  // with no hint that a field went missing, and nobody knows to rotate it.
+  if (spec._redacted && spec._redacted.length) {
+    setMsg(`Loaded "${spec.name}" — credentials were removed (${spec._redacted.join(', ')}). ` +
+           `Re-save with "\${YOUR_VAR}" and set it in the environment. ` +
+           `The old value is still in the saved file: rotate it.`, 'err');
+    return;
+  }
   setMsg(`Loaded "${spec.name}"`, 'ok');
 }
 
