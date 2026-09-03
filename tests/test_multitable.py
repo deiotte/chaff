@@ -120,7 +120,11 @@ def test_streaming_sink_rejected_for_multi_table():
         run(spec)
 
 
-def test_api_rejects_multi_table():
+def test_api_serves_multi_table():
+    """Superseded ADR-0020: the API used to 400 on any multi-table spec and
+    point at the CLI, which left every UI caller stuck. It now previews each
+    table and downloads them as one zip. (Streaming still refuses — a
+    per-record socket has no framing for several tables.)"""
     pytest.importorskip("fastapi")
     pytest.importorskip("httpx")
     from fastapi.testclient import TestClient
@@ -128,5 +132,11 @@ def test_api_rejects_multi_table():
     from api.main import app
     client = TestClient(app)
     body = retail().model_dump()
-    assert client.post("/generate", json=body).status_code == 400
-    assert client.post("/preview", json=body).status_code == 400
+
+    preview = client.post("/preview", json=body)
+    assert preview.status_code == 200, preview.text
+    assert set(preview.json()["tables"]) == {"customers", "orders", "lines"}
+
+    gen = client.post("/generate", json=body)
+    assert gen.status_code == 200, gen.text
+    assert gen.headers["content-type"] == "application/zip"

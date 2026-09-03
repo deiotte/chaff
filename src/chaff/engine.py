@@ -255,10 +255,16 @@ def iter_records(spec: DatasetSpec, *, limit: float | int | None = None) -> Iter
 
 
 def effective_row_count(spec: DatasetSpec) -> int:
-    """How many rows a spec will actually emit (entities × ticks for an
-    entity spec), for request-size limits."""
+    """How many rows a spec will actually emit, for request-size limits.
+
+    Entity specs emit `count × ticks`; a multi-table spec emits the sum over
+    every table (the primary plus each related one) — the caller's ceiling
+    should account for all of it, not just the primary table.
+    """
     if spec.entity:
         return spec.entity.count * spec.entity.ticks
+    if spec.tables:
+        return spec.rows + sum(t.rows for t in spec.tables)
     return spec.rows
 
 
@@ -332,6 +338,42 @@ def run(spec: DatasetSpec) -> str:
     return _egg(spec, receipt)
 
 
+def table_views(spec: DatasetSpec) -> Iterator[tuple[str, DatasetSpec, list[dict[str, Any]]]]:
+    """Yield `(table_name, single-table view, rows)` for a multi-table spec.
+
+    Each view is an ordinary single-table `DatasetSpec` (its own name and
+    columns, `tables` cleared), so every encoder and sink downstream sees
+    exactly what it would see for a plain spec — no encoder knows multi-table
+    exists (INV-2). Generation happens once, in dependency order, so FK
+    integrity holds across the views.
+    """
+    tables = generate_tables(spec)
+    cols_by = {spec.name: spec.columns, **{t.name: t.columns for t in spec.tables or []}}
+    for tname, rows in tables.items():
+        view = spec.model_copy(update={
+            "name": tname,
+            "columns": cols_by[tname],
+            "tables": None,
+        })
+        yield tname, view, rows
+
+
+def encode_tables(spec: DatasetSpec) -> list[tuple[str, str, bytes]]:
+    """Generate + encode every table of a multi-table spec, delivery-free.
+
+    Returns `[(table_name, filename, payload)]`. The caller decides where the
+    bytes go — `run()` hands them to a sink, the API zips them — so this stays
+    a pure function of the spec (INV-2). Shares `table_views` with the sink
+    path, so a downloaded zip and a CLI-written directory hold the same bytes.
+    """
+    ext = get_extension(spec.output.format)
+    encoder = get_encoder(spec.output.format)
+    return [
+        (tname, f"{tname}{ext}", encoder(view, rows))
+        for tname, view, rows in table_views(spec)
+    ]
+
+
 def _run_multi(spec: DatasetSpec) -> str:
     """Generate related tables (FK integrity) and deliver one per table on
     the shared format/sink. Each table encodes as an ordinary single-table
@@ -342,8 +384,6 @@ def _run_multi(spec: DatasetSpec) -> str:
             "sinks (http/kafka/tcp/udp) don't support multi-table yet"
         )
 
-    tables = generate_tables(spec)
-    cols_by = {spec.name: spec.columns, **{t.name: t.columns for t in spec.tables}}
     ext = get_extension(spec.output.format)
     encoder = get_encoder(spec.output.format)
     sink = get_sink(spec.sink.sink)
@@ -352,11 +392,8 @@ def _run_multi(spec: DatasetSpec) -> str:
     base_dir = Path(base).parent if base else Path(".")
 
     receipts = []
-    for tname, rows in tables.items():
-        view = spec.model_copy(update={
-            "name": tname,
-            "columns": cols_by[tname],
-            "tables": None,
+    for tname, view, rows in table_views(spec):
+        view = view.model_copy(update={
             "sink": spec.sink.model_copy(update={
                 "options": {**spec.sink.options, "path": str(base_dir / f"{tname}{ext}")}
             }),

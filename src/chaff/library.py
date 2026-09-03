@@ -46,13 +46,34 @@ def _safe(name: str) -> str:
 
 
 def _summary(name: str, source: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Gallery card fields.
+
+    `rows` must describe what the spec actually emits, not just its `rows`
+    key: an entity spec's length is count × ticks, and a multi-table spec
+    emits every table. A card that advertises the primary table's row count
+    for a 3-table spec is a card that lies to the person clicking it.
+    """
+    entity = data.get("entity") or None
+    tables = data.get("tables") or None
+
+    if entity:
+        rows = (entity.get("count") or 0) * (entity.get("ticks") or 0) or None
+    elif tables:
+        rows = (data.get("rows") or 0) + sum(t.get("rows") or 0 for t in tables)
+    else:
+        rows = data.get("rows")
+
     return {
         "name": name,
         "source": source,
         "description": data.get("description"),
-        "rows": data.get("rows"),
+        "rows": rows,
         "format": (data.get("output") or {}).get("format"),
         "columns": len(data.get("columns") or []),
+        # Shape hints so the card can say *why* the row count looks like it
+        # does. None for a plain flat spec (the common case).
+        "tables": 1 + len(tables) if tables else None,
+        "entity": {"count": entity["count"], "ticks": entity["ticks"]} if entity else None,
     }
 
 

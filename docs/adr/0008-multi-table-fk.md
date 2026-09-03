@@ -1,6 +1,6 @@
 # ADR-0008: Multi-table specs with foreign-key integrity
 
-- Status: Accepted
+- Status: Accepted (delivery to the API superseded by ADR-0020)
 - Owner: Karl (implemented by Claude Code)
 - Date: 2026-07-11
 
@@ -41,5 +41,9 @@ must keep format ⟂ sink intact (INV-2).
 - The **API** (`/preview`, `/generate`) rejects multi-table specs (one HTTP
   request = one file); the CLI (`chaff generate`) is the multi-table path.
   A UI multi-table builder and a zip-download endpoint are follow-ups.
+  **Superseded by [ADR-0020](0020-whole-spec-round-trip.md):** the follow-up
+  landed. `/generate` returns a zip (one file per table) and `/preview`
+  returns a per-table sample map, so multi-table is no longer CLI-only. The
+  streaming-sink refusal above still stands.
 - The reserved `entity` seam (stateful entities, 3C) is unaffected and still
   open.

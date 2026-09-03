@@ -151,6 +151,15 @@ docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink
 - **Spec library**: pick a preset or a saved schema from the UI gallery, load
   it into the builder, tweak, and go. Saves persist under `CHAFF_LIBRARY_DIR`
   (a Docker volume); presets ship in `examples/`.
+- **Related tables, from the UI** (ADR-0008/0020): a spec can carry extra
+  tables whose columns reference real parent keys (customers -> orders ->
+  lines). Preview shows every table side by side so you can see the keys line
+  up; Download gives you a `.zip` with one file per table. See
+  `examples/retail_orders.json`.
+- **Things that change over time** (ADR-0009): entity specs generate `count`
+  entities and advance them over `ticks` — moving tracks, order lifecycles,
+  sensor drift — one row per entity per tick. Load one from the gallery and
+  the builder shows what's attached. See `examples/moving_tracks.json`.
 - **Describe it in English** (ADR-0010/0011/0013): the UI can draft a spec
   from a plain sentence via **Anthropic, OpenAI, or Google**. Paste your key
   straight into the box (stored only in your browser, never saved on the
