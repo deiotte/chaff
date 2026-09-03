@@ -13,11 +13,50 @@ Design rules (see docs/adr/0001, 0002, 0003):
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 SPEC_VERSION = "1.0"
+
+
+# Dataset and table names become *filenames*: one file per table on disk, one
+# member per table in the downloaded zip. Unvalidated, `../escaped` wrote
+# outside the requested output directory (CLI) and produced a traversal entry
+# in the archive (API). Gate it here, at the contract, so every interface —
+# CLI, API, UI, anything later — inherits the same rule (INV-1).
+_PATH_HOSTILE = re.compile(r"[\x00-\x1f\x7f/\\]")
+_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
+# Windows refuses these as filenames regardless of extension.
+_WINDOWS_RESERVED = {
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
+
+def _reject_unsafe_name(value: str, what: str) -> str:
+    """Reject a name that can't be used as a single, safe path component.
+
+    Deliberately permissive about ordinary text — spaces, dots and unicode are
+    fine, because office Joe names a dataset "Q3 sales" — and strict about the
+    things that make a name stop being one path component.
+    """
+    if _PATH_HOSTILE.search(value):
+        raise ValueError(
+            f"{what} '{value}' may not contain path separators or control characters "
+            "(it becomes a filename)")
+    stripped = value.strip()
+    if stripped in (".", "..") or set(stripped) == {"."}:
+        raise ValueError(f"{what} '{value}' is not a usable filename")
+    if _WINDOWS_DRIVE.match(value):
+        raise ValueError(f"{what} '{value}' may not start with a drive letter")
+    if stripped.split(".")[0].lower() in _WINDOWS_RESERVED:
+        raise ValueError(f"{what} '{value}' is a reserved device name on Windows")
+    if value != stripped:
+        raise ValueError(f"{what} '{value}' has leading or trailing whitespace")
+    return value
 
 
 def _reject_duplicate_columns(cols: list["ColumnSpec"]) -> list["ColumnSpec"]:
@@ -71,6 +110,11 @@ class TableSpec(BaseModel):
     name: str = Field(..., min_length=1, description="Table name; used for its filename and SQL table name.")
     rows: int = Field(..., ge=1, le=10_000_000, description="Record count for this table.")
     columns: list[ColumnSpec] = Field(..., min_length=1)
+
+    @field_validator("name")
+    @classmethod
+    def _name_is_a_safe_filename(cls, v: str) -> str:
+        return _reject_unsafe_name(v, "table name")
 
     @field_validator("columns")
     @classmethod
@@ -128,6 +172,11 @@ class DatasetSpec(BaseModel):
     # switches the engine from independent-row generation to per-entity
     # update loops (tracks, lifecycles, sensors). Absent => unchanged.
     entity: Optional[EntitySpec] = Field(None, description="Stateful entity config (ADR-0009).")
+
+    @field_validator("name")
+    @classmethod
+    def _name_is_a_safe_filename(cls, v: str) -> str:
+        return _reject_unsafe_name(v, "dataset name")
 
     @field_validator("columns")
     @classmethod

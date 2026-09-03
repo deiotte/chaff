@@ -249,6 +249,48 @@ about new generation features.
 - A contributor without a browser gets the Python tiers only (ADR-0022
   accepts this; CI is the backstop).
 
+## Phase 8 — Security hardening (external red-team, 2026-09-03)  ← IN PROGRESS
+An external assessment of `e7bfc04` reported 11 findings. Every one checked so
+far reproduced exactly as described, so the report is treated as accurate
+unless a specific claim fails to reproduce.
+- [x] **F-01 Compose silently dropped its own hardening.** `docker-compose.yml`
+      published `0.0.0.0:8000` and forwarded only the three AI provider keys —
+      `CHAFF_API_TOKEN`, `CHAFF_STREAM_ALLOWED_HOSTS` and the ceilings reached
+      Compose from the host `.env` but never the container process. Following
+      the documented hardening got you none of it, with no error. Now every
+      setting the code reads is forwarded (a test enumerates them and fails on
+      a new one), and the port binds to `127.0.0.1` by default —
+      `localhost:8000` is unchanged, `CHAFF_BIND=0.0.0.0` exposes it
+      deliberately.
+- [x] **F-06 Table names escaped the output directory.** Names became
+      filenames unvalidated: `../escaped` wrote *outside* the requested
+      directory via the CLI and produced a `../../outside/pwn.csv` member in
+      the downloaded zip. Fixed at the contract (`DatasetSpec`/`TableSpec`
+      reject path separators, traversal, control characters, drive letters and
+      Windows device names) so every interface inherits it, plus an
+      independent containment check at both write points.
+- [ ] **F-02 Auth covers streaming only.** With `CHAFF_API_TOKEN` set,
+      `/registry`, `/library`, `/preview`, `/generate` and `/draft` still
+      answer unauthenticated. Agreed direction: require auth on every route
+      when bound to a non-loopback interface, keep localhost open so the
+      Docker quick start is unaffected. The loopback default above is the
+      stopgap until this lands.
+- [ ] **F-03/F-04 Egress is not default-deny**, and the Kafka policy check can
+      be bypassed via nested `config.bootstrap.servers`, a safe first broker,
+      or bracketed IPv6. Needs the policy applied to the *effective* producer
+      config, not the pre-merge options.
+- [ ] **F-05 Saved specs store sink credentials in clear JSON** — bearer
+      tokens round-trip through `/library` verbatim.
+- [ ] **F-09 No cost budget or active-job cap**: `expr: a * 1000000` yields a
+      1 MB field from one row; 70 concurrent stream jobs started locally.
+- [ ] **F-10 `/draft` is unauthenticated**, so provider quota is spendable by
+      any caller.
+- [ ] **F-11 Release workflows trigger on `pull_request` and consume signing
+      secrets when present**; actions use floating tags and the base image is
+      unpinned.
+- [ ] **F-07 CSV/XLSX formula injection** and **F-08 T-SQL `]` not escaped** —
+      both confirmed; output-injection, impact lands on the consumer.
+
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
 - Data anonymization / production-data masking (that's Tonic's lane; chaff

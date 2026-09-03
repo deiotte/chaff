@@ -6,14 +6,38 @@ services:
       # the UI just works). Add Google: set CHAFF_EXTRAS in .env, then rebuild.
       args:
         CHAFF_EXTRAS: ${CHAFF_EXTRAS:-api,streaming,nl,nl-openai}
+    # Bound to loopback on purpose: http://localhost:8000 works exactly as
+    # before, but the container is not reachable from the rest of the network.
+    # chaff's defaults (no auth) assume a single operator on localhost, so
+    # publishing on 0.0.0.0 handed an unauthenticated API to the LAN. To expose
+    # it deliberately, set CHAFF_API_TOKEN and CHAFF_BIND below.
     ports:
-      - "8000:8000"
-    # API keys for the "Describe it in English" button. Put one in .env
-    # (see .env.example); empty here means "off" — the browser never sees it.
+      - "${CHAFF_BIND:-127.0.0.1}:8000:8000"
     environment:
+      # API keys for the "Describe it in English" button. Put one in .env
+      # (see .env.example); empty here means "off" — the browser never sees it.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      # Security settings documented in .env.example. These MUST be listed
+      # here: the app reads them from the container's environment, so a value
+      # in the host .env file alone reaches Compose but never the process —
+      # which silently disabled every one of them.
+      CHAFF_API_TOKEN: ${CHAFF_API_TOKEN:-}
+      CHAFF_STREAM_ALLOWED_HOSTS: ${CHAFF_STREAM_ALLOWED_HOSTS:-}
+      CHAFF_STREAM_MAX_RECORDS: ${CHAFF_STREAM_MAX_RECORDS:-}
+      CHAFF_STREAM_MAX_SECONDS: ${CHAFF_STREAM_MAX_SECONDS:-}
+      CHAFF_STREAM_MAX_SESSIONS: ${CHAFF_STREAM_MAX_SESSIONS:-}
+      CHAFF_STREAM_HANDSHAKE_TIMEOUT: ${CHAFF_STREAM_HANDSHAKE_TIMEOUT:-}
+      CHAFF_STREAM_ALLOW_LINK_LOCAL: ${CHAFF_STREAM_ALLOW_LINK_LOCAL:-}
+      CHAFF_API_MAX_ROWS: ${CHAFF_API_MAX_ROWS:-}
+      # Sink credentials belong in the environment, never in a saved spec.
+      CHAFF_MQTT_USERNAME: ${CHAFF_MQTT_USERNAME:-}
+      CHAFF_MQTT_PASSWORD: ${CHAFF_MQTT_PASSWORD:-}
+      # Optional model overrides for the "Describe it in English" drafter.
+      CHAFF_ANTHROPIC_MODEL: ${CHAFF_ANTHROPIC_MODEL:-}
+      CHAFF_OPENAI_MODEL: ${CHAFF_OPENAI_MODEL:-}
+      CHAFF_GOOGLE_MODEL: ${CHAFF_GOOGLE_MODEL:-}
     volumes:
       - ./out:/app/out
       - ./spec-library:/app/spec-library   # saved schemas persist across restarts

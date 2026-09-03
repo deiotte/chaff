@@ -13,6 +13,7 @@ before — byte-for-byte identical (INV-3).
 from __future__ import annotations
 
 import math
+import os
 import random
 from pathlib import Path
 from typing import Any, Iterator
@@ -358,6 +359,21 @@ def table_views(spec: DatasetSpec) -> Iterator[tuple[str, DatasetSpec, list[dict
         yield tname, view, rows
 
 
+def _safe_member_name(name: str, ext: str) -> str:
+    """A single-component filename for a table, belt-and-braces.
+
+    `DatasetSpec` already rejects path-hostile names, so this should never
+    change anything. It exists because the consequence of a miss here is a
+    file written outside the output directory, or a zip entry that escapes on
+    extraction — cheap to double-check, expensive to get wrong once.
+    """
+    candidate = f"{name}{ext}"
+    base = os.path.basename(candidate.replace("\\", "/"))
+    if base != candidate or base in ("", ".", ".."):
+        raise ValueError(f"unsafe table filename derived from '{name}'")
+    return base
+
+
 def encode_tables(spec: DatasetSpec) -> list[tuple[str, str, bytes]]:
     """Generate + encode every table of a multi-table spec, delivery-free.
 
@@ -369,7 +385,7 @@ def encode_tables(spec: DatasetSpec) -> list[tuple[str, str, bytes]]:
     ext = get_extension(spec.output.format)
     encoder = get_encoder(spec.output.format)
     return [
-        (tname, f"{tname}{ext}", encoder(view, rows))
+        (tname, _safe_member_name(tname, ext), encoder(view, rows))
         for tname, view, rows in table_views(spec)
     ]
 
@@ -392,10 +408,17 @@ def _run_multi(spec: DatasetSpec) -> str:
     base_dir = Path(base).parent if base else Path(".")
 
     receipts = []
+    base_resolved = base_dir.resolve()
     for tname, view, rows in table_views(spec):
+        target = (base_dir / _safe_member_name(tname, ext))
+        # The written path must stay under the directory the user asked for,
+        # even if a name slips past validation (symlinks, future callers).
+        if base_resolved not in target.resolve().parents:
+            raise ValueError(
+                f"table '{tname}' would write outside {base_dir} — refusing")
         view = view.model_copy(update={
             "sink": spec.sink.model_copy(update={
-                "options": {**spec.sink.options, "path": str(base_dir / f"{tname}{ext}")}
+                "options": {**spec.sink.options, "path": str(target)}
             }),
         })
         payload = encoder(view, rows)
