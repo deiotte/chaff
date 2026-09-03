@@ -164,10 +164,13 @@ docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink
   gets a 401 explaining why rather than a dataset. To put it on a network, set
   `CHAFF_BIND=0.0.0.0` **and** `CHAFF_API_TOKEN` — the token is then required
   on **every** route, from every client including localhost (paste it into the
-  **Access token** box in the page header). `CHAFF_STREAM_ALLOWED_HOSTS`
-  additionally restricts where push jobs may connect. Cloud-metadata /
-  link-local addresses (169.254.x, the SSRF classic) are **always** blocked, no
-  config needed. The `/stream` socket is also bounded
+  **Access token** box in the page header). Setting a token also switches
+  egress to **strict** (ADR-0026): push jobs may then only reach public
+  addresses — loopback, RFC1918, CGNAT and multicast are refused unless you
+  name the host in `CHAFF_STREAM_ALLOWED_HOSTS`. Without a token chaff is a
+  local tool and your own `localhost:9092` broker keeps working. Cloud-metadata
+  / link-local addresses (169.254.x, the SSRF classic) are **always** blocked,
+  no config needed. The `/stream` socket is also bounded
   against connection-exhaustion out of the box (ADR-0019): an idle client that
   never sends a spec is dropped after a short handshake window, and concurrent
   live sockets are capped — tune with `CHAFF_STREAM_HANDSHAKE_TIMEOUT` and
