@@ -67,6 +67,8 @@
   .preview-table-name { margin:14px 0 6px; font-size:12px; font-weight:600;
                         text-transform:uppercase; letter-spacing:.04em; color:#555; }
   .preview-table-name:first-child { margin-top:0; }
+  .hdr { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+  .quit-note { max-width:1000px; margin:0 auto; padding:24px; color:var(--muted); }
   .adv-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
   .adv-label { font-size:12px; color:var(--muted); }
   .adv-add { padding:7px 13px; }
@@ -127,8 +129,15 @@
 </head>
 <body>
 <header>
-  <h1>chaff</h1>
-  <p>Describe a dataset, preview it, download it. No engineer required.</p>
+  <div class="hdr">
+    <div>
+      <h1>chaff</h1>
+      <p>Describe a dataset, preview it, download it. No engineer required.</p>
+    </div>
+    <!-- Desktop builds only (ADR-0023). The web/Docker UI never shows this:
+         /shutdown 404s unless CHAFF_DESKTOP=1. -->
+    <button class="btn ghost" id="quitBtn" hidden>Quit chaff</button>
+  </div>
 </header>
 
 <main>
@@ -298,6 +307,7 @@ async function loadRegistry() {
   GENERATORS = reg.generators;
   GEN_EXAMPLES = reg.generator_examples || {};
   UPDATERS = reg.updaters || [];
+  if (reg.desktop) $('quitBtn').hidden = false;
   UPD_EXAMPLES = reg.updater_examples || {};
   // Grouped for the dropdown; fall back to one flat group for older servers.
   GEN_GROUPS = reg.generator_groups || [{ group: '', generators: reg.generators }];
@@ -1114,6 +1124,17 @@ function pollJob(id) {
 function stopPushJob(id) { fetch('/stream/jobs/' + id, { method: 'DELETE', headers: tokenHeaders({}) }).catch(() => {}); }
 
 // ── Wiring ───────────────────────────────────────────────────────
+// Desktop builds only: stop the local server and tell the user the tab is
+// now dead, rather than leaving a page that silently fails every request.
+async function doQuit() {
+  if (!confirm('Stop chaff? This closes the app; unsaved changes are lost.')) return;
+  try { await fetch('/shutdown', { method: 'POST' }); } catch (e) { /* server died mid-reply: expected */ }
+  document.body.innerHTML =
+    '<div class="quit-note"><h1>chaff has stopped.</h1>' +
+    '<p>You can close this tab. Start chaff again to come back.</p></div>';
+}
+
+$('quitBtn').onclick = doQuit;
 $('addCol').onclick = () => addColumn();
 $('addEntityBtn').onclick = () => {
   advanced.entity = { ...BLANK_ENTITY, updates: [] };

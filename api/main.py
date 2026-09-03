@@ -17,9 +17,16 @@ import sys
 import time
 import zipfile
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Callable, Iterator, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
@@ -97,6 +104,8 @@ def registry():
         "sinks": list_sinks(),
         "updaters": list_updaters(),
         "updater_examples": list_updater_examples(),  # params shape per updater
+        # Desktop builds get a Quit button; the web/Docker UI must not.
+        "desktop": DESKTOP_MODE,
     }
 
 
@@ -111,6 +120,54 @@ def _content_disposition(filename: str) -> str:
     """
     cleaned = re.sub(r'[^A-Za-z0-9._-]', "_", filename).lstrip(".") or "dataset"
     return f'attachment; filename="{cleaned[:120]}"'
+
+
+# ── Desktop mode (ADR-0023) ──────────────────────────────────────────
+# The packaged desktop apps have no terminal to close: a macOS .app bundle
+# runs windowless, and asking someone to hunt for a console window (or Force
+# Quit) is not a quit story. So the desktop launcher sets CHAFF_DESKTOP=1 and
+# registers a hook, and the UI grows a Quit button.
+#
+# Off by default, so the Docker/web deployment never exposes it — a public
+# /shutdown would be a denial-of-service button. It is additionally refused
+# from anything but loopback, so a desktop instance can't be stopped by
+# something else on the network.
+
+DESKTOP_MODE = os.environ.get("CHAFF_DESKTOP") == "1"
+
+_shutdown_hook: Optional[Callable[[], None]] = None
+
+
+def set_shutdown_hook(fn: Callable[[], None]) -> None:
+    """Let the launcher own how the server stops (it holds the uvicorn
+    Server). Signals would be the alternative and behave differently on
+    Windows; this keeps one path on every platform."""
+    global _shutdown_hook
+    _shutdown_hook = fn
+
+
+@app.post("/shutdown")
+def shutdown(request: Request):
+    """Stop the local desktop app. Desktop mode, loopback, same-origin only."""
+    if not DESKTOP_MODE:
+        raise HTTPException(status_code=404, detail="not found")
+
+    client = request.client.host if request.client else ""
+    if client not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(status_code=403, detail="shutdown is loopback-only")
+
+    # Loopback alone isn't enough: any page the user happens to visit can POST
+    # to 127.0.0.1 and would look local. A cross-site POST carries an `Origin`
+    # that isn't ours, so reject those — our own page's fetch() sends a
+    # matching one. A missing Origin (curl, the CI smoke test) is allowed:
+    # something already on this machine can kill the process anyway.
+    origin = request.headers.get("origin")
+    if origin and origin.rstrip("/") != str(request.base_url).rstrip("/"):
+        raise HTTPException(status_code=403, detail="shutdown is same-origin only")
+    if _shutdown_hook is None:
+        raise HTTPException(status_code=503, detail="no shutdown hook registered")
+    _shutdown_hook()
+    return {"stopping": True}
 
 
 def _capped_tables(spec: DatasetSpec, limit: int) -> DatasetSpec:

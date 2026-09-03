@@ -1,6 +1,6 @@
 # ADR-0014: Windows one-click .exe distribution
 
-- Status: Accepted
+- Status: Accepted (extended by ADR-0023: MSI, macOS .app, signing)
 - Owner: Karl (implemented by Claude Code)
 - Date: 2026-07-11
 - Amends: ADR-0005 (Docker-first distribution)
@@ -40,7 +40,8 @@ API that produces specs for the engine (INV-1..5 untouched).
 ## Consequences — known limitations (be honest with users)
 - **Unsigned → SmartScreen.** First launch shows "Windows protected your PC";
   the user clicks *More info → Run anyway*. Authenticode signing (future work)
-  removes it.
+  removes it. **Update (ADR-0023):** the signing pipeline now exists and is
+  gated on credentials; it stays unsigned until a certificate is bought.
 - **Antivirus false positives.** Onefile PyInstaller binaries are a common
   heuristic FP; `upx=False` reduces this, but an unsigned exe may still be
   quarantined by aggressive AV.
@@ -62,3 +63,7 @@ API that produces specs for the engine (INV-1..5 untouched).
 - **MSI installer** (Briefcase/Inno Setup): Start-menu shortcut, cleaner
   uninstall, but more build machinery and still unsigned. Deferred; the single
   .exe is the simplest thing to hand over.
+  **Superseded by [ADR-0023](0023-installers-and-signing.md):** an MSI now
+  ships alongside the .exe (WiX, wrapping the same binary). Still unsigned
+  without a certificate, but a bare .exe gets lost in Downloads, which turned
+  out to matter more than the extra machinery.

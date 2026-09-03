@@ -1,0 +1,163 @@
+name: macos-app
+
+# Builds the macOS chaff.app bundle (ADR-0023). PyInstaller can't
+# cross-compile, so this needs a real macOS runner. Mirrors windows-exe.yml.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    # Only when something that could break the build changes — not doc-only PRs.
+    paths:
+      - "packaging/**"
+      - "api/**"
+      - "src/**"
+      - "pyproject.toml"
+      - ".github/workflows/macos-app.yml"
+
+jobs:
+  build:
+    name: build chaff.app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install chaff + build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[api,formats-extra,nl,nl-openai]"
+          pip install pyinstaller pip-licenses
+
+      - name: Regenerate third-party notices (must match the frozen env)
+        run: |
+          python packaging/gen_notices.py
+          python packaging/gen_notices.py --check
+
+      - name: Build chaff.app
+        run: pyinstaller packaging/chaff-macos.spec
+
+      - name: Verify the bundle launches and serves the UI
+        # A .app that builds but can't start is the failure mode that matters:
+        # the bundle is windowless, so a broken one just silently does nothing.
+        # Run the inner binary headless and prove the server answers.
+        run: |
+          test -d dist/chaff.app || { echo "chaff.app not produced"; exit 1; }
+          BIN="dist/chaff.app/Contents/MacOS/chaff"
+          test -x "$BIN" || { echo "bundle has no executable at $BIN"; exit 1; }
+          # Pin the port so the check can't miss a fallback bind, and skip the
+          # browser launch (headless runner).
+          export CHAFF_DESKTOP_PORT=8123 CHAFF_NO_BROWSER=1
+          "$BIN" &
+          APP_PID=$!
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8123/registry >/dev/null 2>&1; then
+              echo "bundle serves /registry"
+              curl -fsS http://127.0.0.1:8123/registry | python -c "import json,sys; d=json.load(sys.stdin); assert d['desktop'] is True, 'desktop mode not armed in the bundle'; print('desktop mode armed')"
+              # Prove the Quit path works in the real bundle, not just in tests.
+              curl -fsS -X POST http://127.0.0.1:8123/shutdown
+              break
+            fi
+            sleep 1
+          done
+          for i in $(seq 1 20); do
+            kill -0 $APP_PID 2>/dev/null || { echo "app stopped via /shutdown"; exit 0; }
+            sleep 1
+          done
+          echo "app did not start, or did not stop on /shutdown"; kill $APP_PID 2>/dev/null; exit 1
+
+      # ── Signing + notarization (ADR-0023) ────────────────────────
+      # Gated on secrets: a Developer ID certificate needs a paid Apple
+      # Developer account. Unsigned, the bundle still runs — the user
+      # right-clicks and picks Open once. The build says so rather than
+      # quietly shipping something users will think is broken.
+      - name: Check for signing credentials
+        id: signing
+        run: |
+          if [ -n "${{ secrets.MACOS_CERT_BASE64 }}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Unsigned build::No MACOS_CERT_BASE64 secret; chaff.app will be UNSIGNED and Gatekeeper will require right-click -> Open. See docs/adr/0023-installers-and-signing.md."
+          fi
+
+      - name: Sign and notarize chaff.app
+        if: steps.signing.outputs.available == 'true'
+        env:
+          CERT_BASE64: ${{ secrets.MACOS_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/chaff-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          CERT_PATH="$RUNNER_TEMP/chaff-cert.p12"
+          cleanup() { rm -f "$CERT_PATH"; security delete-keychain "$KEYCHAIN" 2>/dev/null || true; }
+          trap cleanup EXIT   # the private key must not outlive this step
+
+          echo "$CERT_BASE64" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$CERT_PATH" -k "$KEYCHAIN" -P "$CERT_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychain -d user -s "$KEYCHAIN" login.keychain-db
+
+          # --deep is deprecated but still required for PyInstaller bundles,
+          # which carry many nested unsigned .so/.dylib files.
+          codesign --force --deep --options runtime --timestamp \
+            --sign "$SIGN_IDENTITY" dist/chaff.app
+          codesign --verify --deep --strict --verbose=2 dist/chaff.app
+
+          ditto -c -k --keepParent dist/chaff.app "$RUNNER_TEMP/chaff-notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/chaff-notarize.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          # Staple so the app opens offline without a Gatekeeper round trip.
+          xcrun stapler staple dist/chaff.app
+          xcrun stapler validate dist/chaff.app
+
+      - name: Package chaff.app for download
+        # A raw .app directory loses its executable bits through the artifact
+        # zip; ditto preserves the bundle structure and any signature.
+        run: |
+          cp THIRD-PARTY-NOTICES.txt dist/
+          ditto -c -k --keepParent dist/chaff.app dist/chaff-macos.zip
+          ls -la dist/chaff-macos.zip
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chaff-macos-app
+          path: |
+            dist/chaff-macos.zip
+            dist/THIRD-PARTY-NOTICES.txt
+          if-no-files-found: error
+
+  release:
+    name: attach app to release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: chaff-macos-app
+          path: dist
+      - name: Create/update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/chaff-macos.zip
+          fail_on_unmatched_files: true
+          generate_release_notes: true

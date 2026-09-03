@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX v4 installer for chaff (ADR-0023).
+
+  Wraps the same dist/chaff.exe the onefile build already produces, so the
+  installer adds packaging only — never a second way to build the app.
+
+  What it buys over the bare .exe:
+    - a Start-menu shortcut (the .exe alone lands in Downloads and is lost)
+    - a real uninstall entry in Add/Remove Programs
+    - per-user install (InstallScope perUser), so no admin prompt
+
+  Built by .github/workflows/windows-exe.yml. Version comes from -d Version=…
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <Package Name="chaff"
+           Manufacturer="chaff"
+           Version="$(var.Version)"
+           UpgradeCode="6f2a1c48-9d3e-4f7a-8b21-0c5d7e9a4b13"
+           Scope="perUser"
+           Compressed="yes">
+
+    <!-- Upgrading replaces the old version instead of stacking entries. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of chaff is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="ChaffIcon" SourceFile="!(bindpath.exe)\chaff.exe" />
+    <Property Id="ARPPRODUCTICON" Value="ChaffIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/deiotte/chaff" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="chaff" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ChaffMenuFolder" Name="chaff" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="ChaffFiles" Directory="INSTALLFOLDER">
+      <Component Id="ChaffExe" Guid="*">
+        <File Id="chaff.exe" Source="!(bindpath.exe)\chaff.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="Notices" Guid="*">
+        <File Id="THIRD_PARTY_NOTICES.txt" Source="!(bindpath.exe)\THIRD-PARTY-NOTICES.txt" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <ComponentGroup Id="ChaffShortcuts" Directory="ChaffMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="ChaffStartMenu"
+                  Name="chaff"
+                  Description="Build a synthetic demo dataset"
+                  Target="[INSTALLFOLDER]chaff.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="RemoveChaffMenuFolder" Directory="ChaffMenuFolder" On="uninstall" />
+        <!-- perUser installs need a per-user KeyPath; HKCU is the standard one. -->
+        <RegistryValue Root="HKCU" Key="Software\chaff" Name="installed"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <Feature Id="Main" Title="chaff" Level="1">
+      <ComponentGroupRef Id="ChaffFiles" />
+      <ComponentGroupRef Id="ChaffShortcuts" />
+    </Feature>
+
+    <!-- Offer to launch on finish: the whole point is that it just runs. -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="!(bindpath.msi)\license.rtf" />
+  </Package>
+</Wix>

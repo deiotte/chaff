@@ -44,6 +44,10 @@ def _configure_env() -> None:
     setdefault so a power user can still override via the shell."""
     base = _base_dir()
     os.environ.setdefault("CHAFF_PRESETS_DIR", str(base / "examples"))
+    # Turns on the Quit button and the /shutdown route (ADR-0023). Set, not
+    # setdefault: this process IS the desktop app, and a macOS .app has no
+    # console window to close instead.
+    os.environ["CHAFF_DESKTOP"] = "1"
     lib = _user_library_dir()
     lib.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("CHAFF_LIBRARY_DIR", str(lib))
@@ -60,6 +64,16 @@ def _ensure_importable() -> None:
         sp = str(p)
         if sp not in sys.path:
             sys.path.insert(0, sp)
+
+
+def _preferred_port() -> int:
+    """Port to try first. `CHAFF_DESKTOP_PORT` pins it — for someone whose
+    8000 is permanently busy, and so the CI smoke test knows where to look
+    instead of guessing at a fallback port."""
+    raw = os.environ.get("CHAFF_DESKTOP_PORT", "").strip()
+    if raw.isdigit() and 1 <= int(raw) <= 65535:
+        return int(raw)
+    return 8000
 
 
 def _free_port(preferred: int = 8000) -> int:
@@ -79,6 +93,9 @@ def _free_port(preferred: int = 8000) -> int:
 def _open_browser_when_up(url: str, host: str, port: int) -> None:
     """Open the browser once the server actually accepts connections. A poll
     thread avoids the race where a startup hook fires before the socket binds."""
+    if os.environ.get("CHAFF_NO_BROWSER") == "1":
+        return  # headless: CI smoke tests, or a user who'd rather open it themselves
+
     def _wait() -> None:
         for _ in range(200):  # ~20s cap (200 * 0.1s)
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -96,24 +113,36 @@ def main() -> None:
 
     # Import AFTER env is configured so the static mount + presets resolve.
     import uvicorn
+    from api import main as api_main
     from api.main import app
 
     host = "127.0.0.1"
-    port = _free_port(8000)
+    port = _free_port(_preferred_port())
     url = f"http://{host}:{port}"
 
     print("=" * 60)
     print(f"  chaff is running at  {url}")
-    print("  Your browser should open automatically.")
-    print("  Leave this window open. Close it to stop chaff.")
+    if os.environ.get("CHAFF_NO_BROWSER") == "1":
+        print("  Open that address in your browser.")
+    else:
+        print("  Your browser should open automatically.")
+    print('  Close this window, or click "Quit chaff" in the page, to stop.')
     print("=" * 60)
 
     _open_browser_when_up(url, host, port)
 
     # asyncio + h11 are pure Python: dodges uvloop (no Windows wheel) and
     # httptools (native), so the frozen build stays simple and portable.
-    uvicorn.run(app, host=host, port=port, loop="asyncio", http="h11",
-                log_level="warning")
+    config = uvicorn.Config(app, host=host, port=port, loop="asyncio",
+                            http="h11", log_level="warning")
+    server = uvicorn.Server(config)
+
+    # The launcher owns stopping, since it holds the Server. Signals would be
+    # the alternative and behave differently on Windows (ADR-0023).
+    api_main.set_shutdown_hook(lambda: setattr(server, "should_exit", True))
+
+    server.run()
+    print("chaff stopped.")
 
 
 if __name__ == "__main__":

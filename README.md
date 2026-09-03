@@ -11,16 +11,40 @@ you need it.
 > chaff produces demo/test data only. It is not a training-data pipeline
 > and will not become one.
 
-## Windows: just download chaff.exe (no Docker, no Python)
+## Windows: download and double-click (no Docker, no Python)
 
-The simplest path if you're on Windows. Grab **`chaff.exe`** from the
-[latest release](https://github.com/deiotte/chaff/releases/latest) and
-double-click it.
+Grab either from the [latest release](https://github.com/deiotte/chaff/releases/latest):
 
-1. A small console window opens and your browser pops to the chaff UI.
-2. First time only: Windows may show a blue **"Windows protected your PC"**
-   screen (the app isn't code-signed yet) — click **More info → Run anyway**.
-3. Build a dataset, download it. Close the console window to stop chaff.
+- **`chaff.msi`** — installs it, with a Start-menu shortcut and a normal
+  uninstall entry. No admin rights needed. Recommended: a bare `.exe` tends to
+  get lost in Downloads.
+- **`chaff.exe`** — the single file, if you'd rather not install anything.
+
+1. First time only: Windows shows a blue **"Windows protected your PC"** screen
+   (the app isn't code-signed yet) — click **More info → Run anyway**.
+2. A small console window opens and your browser pops to the chaff UI.
+3. Build a dataset, download it. Click **Quit chaff** in the page, or close the
+   console window, to stop it.
+
+## macOS: download the app
+
+Grab **`chaff-macos.zip`** from the
+[latest release](https://github.com/deiotte/chaff/releases/latest), unzip it,
+and drag `chaff.app` to Applications.
+
+**The first launch needs one extra step.** The app isn't notarized yet, so a
+plain double-click will just refuse, without explaining why:
+
+1. **Right-click** (or Control-click) `chaff.app` → **Open**.
+2. Click **Open** in the dialog that appears.
+3. From then on, double-click works normally.
+
+Your browser opens to the chaff UI. Click **Quit chaff** in the page to stop it
+— there's no console window on macOS.
+
+> Apple Silicon only for now. Signing and notarization (which remove that
+> right-click step) need a paid Apple Developer account —
+> [ADR-0023](docs/adr/0023-installers-and-signing.md) has the details.
 
 No install, no terminal. AI drafting ("Describe it in English") works with an
 Anthropic (Claude) or OpenAI (GPT) key pasted into the UI. Every output format

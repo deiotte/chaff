@@ -91,8 +91,39 @@ Phased. Finish and verify a phase before starting the next (Build DNA §3).
 - [x] Windows one-click `.exe` (PyInstaller onefile, built in CI on
       windows-latest, attached to releases) — ADR-0014. Bundles every format
       + Anthropic/OpenAI drafting; Docker stays the primary cross-platform path.
-- [ ] Code-signing (Authenticode) to drop the SmartScreen "Run anyway" prompt.
-- [ ] macOS `.app` bundle / Windows MSI installer with a Start-menu shortcut.
+- [x] macOS `.app` bundle + Windows MSI installer with a Start-menu shortcut
+      (ADR-0023). MSI wraps the same `chaff.exe` (packaging, not a second
+      build) and adds a Start-menu entry, Add/Remove Programs, per-user
+      install and `MajorUpgrade`. macOS ships a onedir `.app`, zipped with
+      `ditto` to keep the bundle intact. Both specs now share
+      `packaging/bundle_config.py`, so a hidden import can't go missing on one
+      platform. CI smoke-tests the real artifact on both — starts it, asserts
+      `/registry` answers with desktop mode armed, stops it via `/shutdown` —
+      because "the file exists" never caught a missing hidden import.
+- [x] **Desktop Quit path (ADR-0023).** A macOS `.app` runs windowless, so
+      "close the console window" stopped being a quit story. Desktop builds
+      set `CHAFF_DESKTOP=1` and get `POST /shutdown` plus a Quit button;
+      off by default and loopback-only, so the Docker/web deployment never
+      exposes what would be a one-click DoS.
+- [ ] **Code-signing — blocked on certificates, pipeline ready.** Both
+      workflows sign when credentials exist and emit a loud `::warning` when
+      they don't, so an unsigned build never looks signed. What's needed:
+      Windows OV/EV certificate (~$200–700/yr; since 2023 the key must be on
+      hardware or a cloud HSM, so Azure Trusted Signing is the CI-friendly
+      route) and an Apple Developer account ($99/yr) for a Developer ID cert
+      plus notarization. Secret names and the exact steps are in ADR-0023.
+      **Untested** — nobody has run these paths with a real certificate.
+
+### Known gaps
+- macOS builds are single-architecture (whatever `macos-latest` is — arm64
+  today). Intel Macs uncovered; universal2 needs universal wheels that pyarrow
+  doesn't reliably ship.
+- Unsigned macOS is a worse first run than Windows: Gatekeeper refuses a
+  double-click outright and doesn't say why. Right-click → Open, once.
+  Documented in the README; the strongest practical case for the Apple
+  membership.
+- No `.dmg` (drag-to-Applications) and no `.pkg` — the latter needs a second
+  Apple certificate before it beats the zip.
 
 ## Phase 6 — Serve a live stream (not just build one to download)
 Turn chaff from "generate a file and download it" into something that can
