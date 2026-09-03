@@ -5,8 +5,12 @@
   "columns": [
     {"name": "lat", "generator": "lat", "params": {"min": 34.00, "max": 34.30}},
     {"name": "lon", "generator": "lon", "params": {"min": -118.70, "max": -118.20}},
+    {"name": "hae", "generator": "float_uniform", "params": {"min": 40.0, "max": 220.0}},
+    {"name": "speed", "generator": "float_uniform", "params": {"min": 0.0, "max": 32.0}},
     {"name": "heading", "generator": "int_range", "params": {"min": 0, "max": 359}},
-    {"name": "callsign", "generator": "pattern", "params": {"pattern": "RAVEN-##"}}
+    {"name": "ce", "generator": "float_uniform", "params": {"min": 3.5, "max": 45.0}},
+    {"name": "le", "generator": "float_uniform", "params": {"min": 5.0, "max": 60.0}},
+    {"name": "battery", "generator": "int_range", "params": {"min": 12, "max": 100}}
   ],
   "output": {
     "format": "cot",
@@ -15,7 +19,10 @@
       "base_time": "2026-01-01T00:00:00Z",
       "interval_seconds": 5,
       "stale_seconds": 30,
-      "type": "a-f-A-M-F-Q"
+      "type": "a-f-A-M-F-Q",
+      "geopointsrc": "GPS",
+      "altsrc": "GPS",
+      "takv_version": "0.1.0"
     }
   },
   "sink": {"sink": "file", "options": {"path": "out/cot_tracks.cot"}},

@@ -394,6 +394,27 @@ unless a specific claim fails to reproduce.
       green throughout. Fixed with `engine.encode_view()`, and a test now
       generates and encodes every example spec in its declared format.
 
+## Phase 9 — Emit like a real sensor  ← IN PROGRESS
+chaff's sensor-format encoders were written to prove the format worked, not to
+exercise a consumer. Measuring the CoT encoder against a strict CoT 2.0 reader
+found it reached 6 of the 12 fields that reader maps, and fabricated one.
+- [x] **CoT emitter fidelity (ADR-0032).** `hae` no longer defaults to `0.0` —
+      a consumer reads that as a measured zero height, not as absence, and CoT
+      reserves `9999999` for "unknown". Same rule now covers `ce`/`le`, which
+      come from columns instead of being pinned to the sentinel. `<track speed
+      course>`, `<status battery>` and `<precisionlocation>` are emitted when
+      the data carries them (the preset generated `heading` and the encoder
+      dropped it). `<takv platform>` defaults to `chaff` so every event says in
+      its own provenance field that a generator made it. Non-finite values can
+      no longer reach the wire. All 12 mapped fields now reachable; verified by
+      decoding the preset's 480 events with a real reader — 0 refusals, 0
+      anomalies.
+- [ ] **MISB ST 0903.6 (VMTI) encoder.** The other format this class of
+      consumer speaks, and a much bigger job than CoT: BER-TLV framing, an
+      item table, ST 1201 IMAPA/IMAPB numeric packing. Own round, own ADR.
+      Note the trap before starting: a second implementation of a standard is
+      only safe if something checks it against a real decoder.
+
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
 - Data anonymization / production-data masking (that's Tonic's lane; chaff
