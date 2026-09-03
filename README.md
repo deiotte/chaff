@@ -155,7 +155,11 @@ docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink
   **`/stream` WebSocket**, or **push to a broker/endpoint** (Kafka/MQTT/HTTP/
   TCP/UDP) as a bounded, stoppable server-side job (`/stream/jobs`). Every run
   is capped (records + seconds, hard-ceilinged) and re-confirms before going
-  again — no runaway feeds. Generation is lazy and can run past the row count;
+  again — no runaway feeds. Those caps bound how *long* a job runs, so a
+  separate one bounds how *many*: eight at once by default
+  (`CHAFF_STREAM_MAX_ACTIVE_JOBS`), and a ninth start gets a 429 telling you
+  to stop one or raise the ceiling (ADR-0029).
+  Generation is lazy and can run past the row count;
   determinism holds per-record: the i-th record is always the same, whatever
   the stream's length.
 - **Exposing chaff beyond localhost?** (ADR-0018/0024/0025) chaff's defaults
@@ -228,7 +232,10 @@ docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink
   columns in the same row via a safe formula — `total = price * qty`,
   `tier = 'wholesale' if net > 500 else 'retail'`. No `eval` (formulas are
   parsed, not run), and it adds zero entropy so seeded output stays
-  byte-identical. The realism unlock: the numbers actually add up. See
+  byte-identical. The realism unlock: the numbers actually add up. Formulas
+  carry a cost budget (ADR-0029) so one cell can't build a megabyte —
+  `note * 1000000` is refused before it allocates anything, while the
+  calculations you'd actually write are untouched. See
   `examples/orders_with_totals.json`.
 - **Correlated columns** (ADR-0015): mark a `country` column `{"link": true}`
   and give `city`/`timezone`/`currency_code`/`lat`/`lon` a `{"from": "country"}`
