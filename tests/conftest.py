@@ -33,10 +33,81 @@ def _unavailable(reason: str):
     pytest.skip(reason)
 
 
+# ── Tests present as a local operator (ADR-0025) ─────────────────────
+# chaff serves localhost without a token and refuses remote callers that don't
+# have one. Starlette's TestClient defaults its peer address to the literal
+# "testclient", which is correctly classified as *remote* — so without this
+# every existing test would exercise the refused path and 401.
+#
+# Applied at conftest import, not as a fixture, because several test modules
+# build their client at module scope (`client = TestClient(app)`), which runs
+# before any fixture could patch it.
+#
+# The suite is overwhelmingly about what a local operator can do, so that is
+# the default. The remote and token-configured paths are not left to chance:
+# tests/test_access_control.py sets the peer address explicitly and asserts
+# the refusals.
+def _default_testclient_to_loopback() -> None:
+    import starlette.testclient as testclient_module
+
+    original_init = testclient_module.TestClient.__init__
+    if getattr(original_init, "_chaff_loopback_default", False):
+        return
+
+    def local_init(self, *args, **kwargs):
+        kwargs.setdefault("client", ("127.0.0.1", 50000))
+        return original_init(self, *args, **kwargs)
+
+    local_init._chaff_loopback_default = True
+    testclient_module.TestClient.__init__ = local_init
+
+
+_default_testclient_to_loopback()
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+@pytest.fixture
+def token_server():
+    """A live server that requires an access token, for the UI's refusal path.
+
+    Function-scoped and separate from `live_server` (which is session-scoped
+    and open) because arming auth is a different app instance: CHAFF_API_TOKEN
+    is read at import time.
+    """
+    import importlib
+
+    try:
+        import uvicorn
+
+        import api.auth
+        import api.main
+    except ImportError as e:
+        _unavailable(f"can't start the app ({e}); needs the 'api' extra")
+
+    os.environ["CHAFF_API_TOKEN"] = "s3cret"
+    importlib.reload(api.auth)
+    module = importlib.reload(api.main)
+    port = _free_port()
+    server = uvicorn.Server(uvicorn.Config(
+        module.app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.time() + 30
+    while time.time() < deadline and not getattr(server, "started", False):
+        time.sleep(0.05)
+    try:
+        yield f"http://127.0.0.1:{port}", "s3cret"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
+        os.environ.pop("CHAFF_API_TOKEN", None)
+        importlib.reload(api.auth)
+        importlib.reload(api.main)
 
 
 @pytest.fixture(scope="session")

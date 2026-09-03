@@ -100,12 +100,19 @@ def test_shutdown_runs_the_hook_for_a_loopback_caller(monkeypatch):
 
 def test_shutdown_refuses_a_non_loopback_caller(monkeypatch):
     """Defense in depth: the launcher binds 127.0.0.1 only, but a desktop
-    instance must not be stoppable by anything else on the network."""
+    instance must not be stoppable by anything else on the network.
+
+    The peer address is set explicitly. This test used to pass because
+    TestClient's default peer is the literal "testclient", which happens not
+    to parse as a loopback IP — an incidental property, not an assertion. It
+    now names the remote address it is testing.
+    """
     module = _app(monkeypatch, desktop=True)
     fired = []
     module.set_shutdown_hook(lambda: fired.append(1))
-    r = TestClient(module.app).post("/shutdown")
-    assert r.status_code == 403
+    remote = TestClient(module.app, client=("203.0.113.9", 40000))
+    r = remote.post("/shutdown")
+    assert r.status_code in (401, 403), r.text
     assert not fired, "shutdown ran for a non-loopback client"
 
 

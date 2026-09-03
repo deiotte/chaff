@@ -27,7 +27,12 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
@@ -90,6 +95,37 @@ def _enforce_row_limit(rows: int) -> None:
             detail=f"spec requests {rows} rows; this API caps inline generation at "
                    f"{cap} (set CHAFF_API_MAX_ROWS to change). Use the CLI for bulk output.",
         )
+
+
+# ── Access control (ADR-0025) ────────────────────────────────────────
+# Middleware, deliberately, not a per-route dependency. F-02 happened exactly
+# because routes were added and nobody remembered to hang `require_token` on
+# them — with a dependency, a new route is open until someone notices; with
+# middleware, a new route is protected until someone deliberately exempts it.
+# The failure mode this fixes is forgetting, so the default has to be closed.
+#
+# Only what you need to bootstrap stays open: the page itself (you must be
+# able to load it to type the token in) and the licence text (attribution has
+# to be readable in a redistributed build).
+_OPEN_PREFIXES = ("/licenses",)
+_OPEN_PATHS = {"/", "/index.html", "/favicon.ico"}
+
+
+def _is_open(path: str) -> bool:
+    return path in _OPEN_PATHS or path.startswith(_OPEN_PREFIXES)
+
+
+@app.middleware("http")
+async def enforce_access(request: Request, call_next):
+    if _is_open(request.url.path):
+        return await call_next(request)
+    reason = auth.access_denied_reason(
+        request.client.host if request.client else None,
+        auth.token_from_headers(request.headers),
+    )
+    if reason:
+        return JSONResponse(status_code=401, content={"detail": reason})
+    return await call_next(request)
 
 
 @app.get("/registry")
@@ -394,10 +430,14 @@ def _resolve_stream_limit(spec: DatasetSpec, max_records: Optional[int],
 async def stream(websocket: WebSocket):
     global _active_ws_sessions
     await websocket.accept()
-    # Auth gate (ADR-0018): a no-op unless CHAFF_API_TOKEN is set. Checked after
-    # accept so we can hand the client a readable error frame, not a bare close.
-    if not auth.ws_token_ok(websocket):
-        await websocket.send_json({"error": "missing or invalid API token"})
+    # Access gate (ADR-0018, widened ADR-0025). Checked after accept so we can
+    # hand the client a readable error frame, not a bare close. The *reason*
+    # comes from the same helper the HTTP middleware uses: a remote caller on
+    # a server with no token configured needs to be told that, not sent
+    # hunting for a token that doesn't exist.
+    ws_denied = auth.ws_denied_reason(websocket)
+    if ws_denied:
+        await websocket.send_json({"error": ws_denied})
         await websocket.close(code=1008)  # policy violation
         return
 
@@ -501,7 +541,7 @@ class StreamJobRequest(BaseModel):
     rate: Optional[float] = None  # records/sec pacing; None = as fast as the sink drains
 
 
-@app.post("/stream/jobs", dependencies=[Depends(auth.require_token)])
+@app.post("/stream/jobs")
 def stream_job_start(req: StreamJobRequest):
     from . import stream_jobs
     try:
@@ -512,13 +552,13 @@ def stream_job_start(req: StreamJobRequest):
     return job.public()
 
 
-@app.get("/stream/jobs", dependencies=[Depends(auth.require_token)])
+@app.get("/stream/jobs")
 def stream_jobs_list():
     from . import stream_jobs
     return {"jobs": stream_jobs.list_jobs()}
 
 
-@app.get("/stream/jobs/{job_id}", dependencies=[Depends(auth.require_token)])
+@app.get("/stream/jobs/{job_id}")
 def stream_job_status(job_id: str):
     from . import stream_jobs
     try:
@@ -527,7 +567,7 @@ def stream_job_status(job_id: str):
         raise HTTPException(status_code=404, detail=f"no such stream job '{job_id}'")
 
 
-@app.delete("/stream/jobs/{job_id}", dependencies=[Depends(auth.require_token)])
+@app.delete("/stream/jobs/{job_id}")
 def stream_job_stop(job_id: str):
     from . import stream_jobs
     try:

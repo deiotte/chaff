@@ -269,12 +269,19 @@ unless a specific claim fails to reproduce.
       reject path separators, traversal, control characters, drive letters and
       Windows device names) so every interface inherits it, plus an
       independent containment check at both write points.
-- [ ] **F-02 Auth covers streaming only.** With `CHAFF_API_TOKEN` set,
-      `/registry`, `/library`, `/preview`, `/generate` and `/draft` still
-      answer unauthenticated. Agreed direction: require auth on every route
-      when bound to a non-loopback interface, keep localhost open so the
-      Docker quick start is unaffected. The loopback default above is the
-      stopgap until this lands.
+- [x] **F-02 Auth covered streaming only (ADR-0025).** With `CHAFF_API_TOKEN`
+      set, `/registry`, `/library`, `/preview`, `/generate` and `/draft` still
+      answered unauthenticated — 15 routes, 4 protected. Now: a token, when
+      set, is required on every route from every client including loopback (a
+      reverse proxy makes every request look local, so a loopback exemption
+      would disable auth for exactly that deployment); with no token, loopback
+      is served and remote callers get a 401 that says what to do. The
+      zero-config localhost demo is unchanged. Enforced by **middleware, not a
+      per-route dependency** — the finding exists because routes were added and
+      the dependency wasn't, so a new route is now protected until someone
+      deliberately exempts it, and a test fails on any route not accounted for.
+      The UI wraps `fetch` for the same reason, moved its token box to the
+      header, and explains a refusal instead of dying on "Loading…".
 - [ ] **F-03/F-04 Egress is not default-deny**, and the Kafka policy check can
       be bypassed via nested `config.bootstrap.servers`, a safe first broker,
       or bracketed IPv6. Needs the policy applied to the *effective* producer

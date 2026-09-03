@@ -278,3 +278,52 @@ def test_gallery_cards_state_the_real_shape(page):
     assert "3 tables" in cards["retail_orders"] and "850" in cards["retail_orders"]
     assert "10×30" in cards["moving_tracks"] and "300" in cards["moving_tracks"]
     assert "9 cols" in cards["crm_contacts"]  # plain specs unchanged
+
+
+# ── the token-protected server (ADR-0025) ────────────────────────────
+
+def test_a_protected_server_tells_you_what_to_do(browser, token_server):
+    """A page that silently fails is the failure this project keeps fixing.
+
+    On a server that requires a token the page must still load, say what is
+    wrong, and recover completely once the token is supplied — not sit on
+    "Loading…" forever with a console full of errors, which is what it did
+    before the refusal path existed.
+    """
+    base, token = token_server
+    ctx = browser.new_context()
+    page = ctx.new_page()
+    errors: list[str] = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    try:
+        page.goto(base, wait_until="networkidle")
+
+        # The page itself is reachable — you must be able to load it to type
+        # the token into it.
+        assert page.locator("h1").inner_text() == "chaff"
+        assert page.locator("#apiToken").is_visible()
+
+        banner = page.locator("#authBanner")
+        assert banner.is_visible(), "no explanation shown for a refused page"
+        assert "access token" in banner.inner_text().lower()
+        assert page.locator(".spec-card").count() == 0
+
+        # A wrong token gets a different, accurate message.
+        page.locator("#apiToken").fill("wrong")
+        page.locator("#apiToken").dispatch_event("change")
+        page.wait_for_timeout(1200)
+        assert "refused" in banner.inner_text().lower()
+
+        # The right one recovers everything, not just the registry.
+        page.locator("#apiToken").fill(token)
+        page.locator("#apiToken").dispatch_event("change")
+        page.wait_for_timeout(2000)
+        assert banner.is_hidden(), banner.inner_text()
+        assert page.locator(".spec-card").count() > 0, "gallery never recovered"
+
+        page.locator("#previewBtn").click()
+        page.wait_for_timeout(1500)
+        assert page.locator("#preview th").count() > 0, "preview failed with a valid token"
+    finally:
+        ctx.close()
+    assert not errors, f"JavaScript errors on the page: {errors}"
