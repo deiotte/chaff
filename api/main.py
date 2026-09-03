@@ -42,6 +42,7 @@ from chaff import __version__, library
 from chaff.engine import (
     effective_row_count,
     encode_tables,
+    encode_view,
     generate_records,
     generate_tables,
     iter_records,
@@ -264,7 +265,7 @@ def generate(spec: DatasetSpec):
         return _generate_multitable_zip(spec)
     try:
         rows = generate_records(spec)
-        payload = get_encoder(spec.output.format)(spec, rows)
+        payload = get_encoder(spec.output.format)(encode_view(spec), rows)
         ext = get_extension(spec.output.format)
     except KeyError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 from typing import Any, Callable
 
 from ..spec import DatasetSpec
+from . import _formula
 
 EncoderFn = Callable[[DatasetSpec, list[dict[str, Any]]], bytes]
 RecordEncoderFn = Callable[[DatasetSpec, dict[str, Any]], bytes]
@@ -79,12 +80,32 @@ def list_record_formats() -> list[str]:
 # ── Delimited ────────────────────────────────────────────────────────
 
 def _delimited(spec: DatasetSpec, rows: list[dict], delimiter: str) -> bytes:
+    """Header row plus one row per record, in spec-column order.
+
+    Column order comes from the spec, not from each row's key order, so a
+    row that is missing a key or carries a stray one can't shift a column.
+    Values are run through the formula guard (see `_formula`) because a
+    delimited file opened in a spreadsheet evaluates formula-leading cells.
+    """
+    mode = _formula.guard_mode(spec.output.options)
+    cols = [c.name for c in spec.columns]
+    known = set(cols)
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=[c.name for c in spec.columns],
-                            delimiter=delimiter, lineterminator="\n")
-    writer.writeheader()
+    writer = csv.writer(buf, delimiter=delimiter, lineterminator="\n")
+    writer.writerow([_formula.neutralize(c, mode) for c in cols])
     for r in rows:
-        writer.writerow({k: ("" if v is None else v) for k, v in r.items()})
+        # csv.DictWriter used to raise on a key the spec doesn't declare.
+        # Keep that tripwire: a row carrying an undeclared column means the
+        # engine and the spec disagree, and silently dropping it would hide
+        # the disagreement in a file that looks complete.
+        extra = r.keys() - known
+        if extra:
+            raise ValueError(
+                f"row contains columns not declared in the spec: {sorted(extra)}")
+        writer.writerow([
+            "" if r.get(c) is None else _formula.neutralize(r.get(c), mode)
+            for c in cols
+        ])
     return buf.getvalue().encode("utf-8")
 
 
@@ -130,10 +151,18 @@ def _json_record(spec: DatasetSpec, record: dict) -> bytes:
 
 @record_encoder("csv")
 def _csv_record(spec: DatasetSpec, record: dict) -> bytes:
-    """One CSV row (no header) in spec-column order, properly quoted."""
+    """One CSV row (no header) in spec-column order, properly quoted.
+
+    Guarded like the whole-file encoder: a streamed CSV record is just as
+    likely to end up pasted into a spreadsheet as a downloaded one.
+    """
+    mode = _formula.guard_mode(spec.output.options)
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
-    writer.writerow(["" if record[c.name] is None else record[c.name] for c in spec.columns])
+    writer.writerow([
+        "" if record[c.name] is None else _formula.neutralize(record[c.name], mode)
+        for c in spec.columns
+    ])
     return buf.getvalue().encode("utf-8")
 
 
@@ -147,8 +176,17 @@ _SQL_TYPE_MAP = {  # python type -> portable SQL type
 
 
 def _sql_ident(name: str, dialect: str) -> str:
+    """Quote an identifier for `dialect`, escaping the closing delimiter.
+
+    Column and dataset names are deliberately permissive (office Joe types
+    freely), so the delimiter is the only thing standing between a name and
+    the surrounding statement. Doubling it is the escape both dialect
+    families define: `]]` inside brackets, `""` inside double quotes.
+    Without it, a name of `x]; DROP TABLE audit;--` closes the bracket and
+    everything after it becomes live SQL in the file a consumer runs.
+    """
     if dialect == "tsql":
-        return f"[{name}]"
+        return "[" + name.replace("]", "]]") + "]"
     return '"' + name.replace('"', '""') + '"'
 
 

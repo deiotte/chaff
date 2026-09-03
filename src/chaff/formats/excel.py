@@ -22,7 +22,7 @@ import zipfile
 from datetime import datetime
 from typing import Any
 
-from . import encoder
+from . import _formula, encoder
 from ..spec import DatasetSpec
 
 # Fixed instants so nothing wall-clock-derived reaches the payload.
@@ -84,13 +84,38 @@ def to_xlsx(spec: DatasetSpec, rows: list[dict]) -> bytes:
     props.modified = _FIXED_DT
     props.lastModifiedBy = "chaff"
 
+    mode = _formula.guard_mode(spec.output.options)
     ws.append(cols)
-    for r in rows:
-        ws.append([_cell(r.get(c)) for c in cols])
+    _guard_row(ws, 1, cols, mode)
+    for i, r in enumerate(rows, start=2):
+        values = [_cell(r.get(c)) for c in cols]
+        ws.append(values)
+        _guard_row(ws, i, values, mode)
 
     buf = io.BytesIO()
     wb.save(buf)
     return _normalize_zip(buf.getvalue())
+
+
+def _guard_row(ws: Any, row: int, values: list[Any], mode: str) -> None:
+    """Stop a spreadsheet from evaluating any formula-leading cell in `row`.
+
+    .xlsx gets a strictly better fix than a delimited file does. openpyxl
+    types a string starting with `=` as a formula (`data_type == "f"`), and
+    the cell is then written into the sheet as one. Forcing the type back to
+    string stores the exact text the generator produced, with no apostrophe
+    and no mangling — so unlike CSV, the guard here is invisible even under
+    "strict". `quotePrefix` is the second half: it keeps the cell text if
+    someone clicks in and presses Enter, which would otherwise re-parse it.
+    """
+    if mode == "off":
+        return
+    for col, value in enumerate(values, start=1):
+        if not isinstance(value, str) or not _formula.is_formula(value, mode):
+            continue
+        cell = ws.cell(row=row, column=col)
+        cell.data_type = "s"
+        cell.quotePrefix = True
 
 
 def _cell(v: Any) -> Any:

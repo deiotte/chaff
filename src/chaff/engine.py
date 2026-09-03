@@ -30,7 +30,7 @@ from .sinks import (
     time_limited,
 )
 from .secrets import resolve_env
-from .spec import DatasetSpec
+from .spec import ColumnSpec, DatasetSpec
 from .updaters import EntityContext, get_updater
 
 
@@ -294,7 +294,8 @@ def stream_encoded(
     fast here — before any sink or network is touched (INV-2 stays intact:
     the engine encodes; the sink only delivers)."""
     rec_enc = get_record_encoder(spec.output.format)
-    records = (rec_enc(spec, r) for r in iter_records(spec, limit=limit))
+    view = encode_view(spec)
+    records = (rec_enc(view, r) for r in iter_records(spec, limit=limit))
     paced = rate_limited(records, rate)
     if duration:
         paced = time_limited(paced, float(duration))
@@ -349,10 +350,45 @@ def run(spec: DatasetSpec) -> str:
         receipt = get_stream_sink(sink_id)(spec, stream)
     else:
         rows = generate_records(spec)  # single-table or entity ticks
-        payload = get_encoder(spec.output.format)(spec, rows)
+        payload = get_encoder(spec.output.format)(encode_view(spec), rows)
         receipt = get_sink(sink_id)(spec, payload)
 
     return _egg(spec, receipt)
+
+
+#: Generator id for columns the engine fills in itself (entity id, tick).
+#: Intentionally unregistered — see `encode_view`.
+_ENGINE_SUPPLIED = "__engine_supplied__"
+
+
+def encode_view(spec: DatasetSpec) -> DatasetSpec:
+    """The spec a column-oriented encoder should see for this spec's rows.
+
+    An entity run emits two columns the spec never declares: `iter_entity_rows`
+    puts the entity id and the tick number into every snapshot. Column-oriented
+    encoders (csv, tsv, sql, xlsx, parquet, avro) take their column list from
+    `spec.columns`, so without this view they drop the two columns that make a
+    time series readable — and csv refused the row outright, which is why
+    `chaff generate examples/order_lifecycle.json` raised. Row-oriented formats
+    (json, ndjson, xml, cot) serialize the row dict and were never affected;
+    that asymmetry is why it went unnoticed, since `make check` only ever
+    *validated* the entity presets and never generated one.
+
+    The view exists for encoding only. The two synthesized ColumnSpecs name a
+    generator that is deliberately not registered: their values come from the
+    engine, never from a generator, so anything that tries to *generate* from
+    this view should fail loudly naming `__engine_supplied__` rather than
+    quietly producing wrong values. Multi-table specs get their views from
+    `table_views`; a plain spec is its own view.
+    """
+    ent = spec.entity
+    if ent is None:
+        return spec
+    synthesized = [
+        ColumnSpec(name=ent.id_column, generator=_ENGINE_SUPPLIED),
+        ColumnSpec(name=ent.tick_column, generator=_ENGINE_SUPPLIED),
+    ]
+    return spec.model_copy(update={"columns": synthesized + list(spec.columns)})
 
 
 def table_views(spec: DatasetSpec) -> Iterator[tuple[str, DatasetSpec, list[dict[str, Any]]]]:
