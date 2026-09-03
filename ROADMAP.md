@@ -332,11 +332,41 @@ unless a specific claim fails to reproduce.
       **Residual:** a sink hung on a socket still holds its slot (`max_seconds`
       bounds the generator, not the sink); the budget is per value, not a
       whole-run byte accounting; nothing here rate-limits requests.
-- [ ] **F-10 `/draft` is unauthenticated**, so provider quota is spendable by
-      any caller.
-- [ ] **F-11 Release workflows trigger on `pull_request` and consume signing
-      secrets when present**; actions use floating tags and the base image is
-      unpinned.
+- [x] **F-10 `/draft` had no cost budget (ADR-0030).** The report's headline —
+      unauthenticated — was already closed by ADR-0025; the *cost* half was
+      not. Re-measured as a local operator: a 5,000,000-character description
+      reached the provider verbatim, and 40 rapid requests made 40 provider
+      calls (each of which can be two, since an invalid draft is retried).
+      A token says who may spend; nothing said how much. Now a 4,000-character
+      prompt ceiling (413), 10 requests per minute per client address (429),
+      and a 60s timeout on every provider call, all before anything reaches a
+      provider. Rate 0 turns drafting off. The limits apply to a pasted key
+      too — bring-your-own-key spends someone else's quota, but chaff is still
+      the proxy.
+      **Residual:** this rate-limits one route, not the API; per address is
+      not per person; the retry still makes one request cost two calls.
+- [x] **F-11 PR-triggered release workflows and mutable build inputs
+      (ADR-0031).** Signing gated on whether the secret existed, not on which
+      event was running — so a PR would decrypt the certificate into the
+      runner, and it was interpolated into the script body rather than passed
+      through `env`. Watched firing on four consecutive PRs in this series.
+      PR builds stay (they caught three WiX errors during ADR-0023) and now
+      never sign: the event check lives in the one step every signing step
+      gates on, and the secret expression is empty on a PR so the certificate
+      never reaches the runner. Also: all five actions pinned to commit SHAs,
+      base image pinned by digest, least-privilege `permissions` on every
+      workflow, and Dependabot — because a pin nothing bumps freezes an
+      unpatched base, which is worse than the mutable tag it replaced.
+      **Residual, and it matters:** a contributor who can edit the workflow can
+      delete the gate. Only repository settings stop that — a protected
+      Environment holding the signing secrets with required reviewers, and
+      branch protection on `.github/workflows/**`. Neither is a code change.
+      Pinning also does not *verify*: `pip install -e .` still resolves ranges
+      at build time, with no lockfile or SBOM.
+- [ ] **Bump the Node 20 actions.** `actions/checkout@v4` and
+      `actions/setup-python@v5` are pinned at the versions in use and emit a
+      deprecation warning. Bumping majors is a deliberate change with breaking
+      potential, not a rider on a security fix — do it on its own.
 - [x] **F-07/F-08 Output injection into spreadsheets and SQL (ADR-0028).**
       `=HYPERLINK(...)` reached CSV as a live formula and .xlsx as a real
       formula cell; a dataset named `x]; DROP TABLE audit;--` closed its own

@@ -25,6 +25,8 @@ from chaff.formats import list_formats
 from chaff.generators import list_generators
 from chaff.spec import load_spec
 
+from .draft_budget import timeout_seconds
+
 # Per-provider default models, each overridable by env var.
 _MODELS = {
     "anthropic": ("CHAFF_ANTHROPIC_MODEL", "claude-opus-4-8"),
@@ -128,7 +130,10 @@ def _call_anthropic(system: str, user: str, api_key: str | None = None) -> str:
         import anthropic
     except ImportError as e:
         raise _missing("anthropic", "nl") from e
-    resp = anthropic.Anthropic(api_key=api_key).messages.create(
+    # A timeout on every provider call (ADR-0030). Without one a hung
+    # connection pins the worker thread for as long as the socket stays open,
+    # which is a denial of service that costs the attacker nothing.
+    resp = anthropic.Anthropic(api_key=api_key, timeout=timeout_seconds()).messages.create(
         model=_model("anthropic"), max_tokens=MAX_TOKENS,
         system=system, messages=[{"role": "user", "content": user}],
     )
@@ -140,7 +145,7 @@ def _call_openai(system: str, user: str, api_key: str | None = None) -> str:
         from openai import OpenAI
     except ImportError as e:
         raise _missing("openai", "nl-openai") from e
-    resp = OpenAI(api_key=api_key).chat.completions.create(
+    resp = OpenAI(api_key=api_key, timeout=timeout_seconds()).chat.completions.create(
         model=_model("openai"),
         messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
         response_format={"type": "json_object"},  # forces valid JSON
@@ -157,7 +162,8 @@ def _call_google(system: str, user: str, api_key: str | None = None) -> str:
     genai.configure(api_key=key)
     model = genai.GenerativeModel(_model("google"), system_instruction=system)
     resp = model.generate_content(
-        user, generation_config={"response_mime_type": "application/json"})
+        user, generation_config={"response_mime_type": "application/json"},
+        request_options={"timeout": timeout_seconds()})
     return resp.text
 
 

@@ -633,16 +633,28 @@ class DraftRequest(BaseModel):
 
 
 @app.post("/draft")
-def draft(req: DraftRequest):
+def draft(req: DraftRequest, request: Request):
     """Draft a spec from plain English for the user to review/edit (INV-1).
 
     The key can come from the server env (ANTHROPIC_API_KEY / OPENAI_API_KEY /
     GOOGLE_API_KEY) or be pasted into the UI and sent with the request. A
     request key is used for that call only — never written to disk or logged.
+
+    This is the only route that spends money, so it is also the only one with
+    a cost budget (ADR-0030): a prompt ceiling and a per-client rate, checked
+    before anything reaches a provider. The limits apply to a pasted key too —
+    the server is still acting as the proxy either way.
     """
+    from . import draft_budget
+
     description = req.description.strip()
     if not description:
         raise HTTPException(status_code=400, detail="description is required")
+    try:
+        draft_budget.check_prompt(description)
+        draft_budget.check_rate(request.client.host if request.client else None)
+    except draft_budget.DraftRefused as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
     from . import nl
 
     key = (req.api_key or "").strip() or None

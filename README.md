@@ -223,7 +223,12 @@ docker compose --profile streaming up --build  # + Kafka & MQTT brokers for sink
   server) — or set a server-side key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
   / `GOOGLE_API_KEY`). It drafts a *spec* you review and edit — the engine
   still generates the data deterministically. Not an AI/ML data pipeline
-  (INV-5), just a spec-builder aid.
+  (INV-5), just a spec-builder aid. It's the one route that spends money, so
+  it's the one with a budget (ADR-0030): descriptions are capped at 4,000
+  characters, drafting is limited to 10 requests a minute per caller, and every
+  provider call has a timeout — tune with `CHAFF_DRAFT_MAX_CHARS` /
+  `CHAFF_DRAFT_RATE_PER_MINUTE` / `CHAFF_DRAFT_TIMEOUT_SECONDS`, or set the
+  rate to `0` to turn drafting off entirely.
 - **Multi-table** (ADR-0008): add related `tables` and an `fk` column that
   references another table's key; chaff generates them in dependency order
   with real referential integrity (customers → orders → lines), one file per
@@ -283,6 +288,22 @@ them locally too:
 pip install -e '.[dev-browser]'
 python -m playwright install chromium
 ```
+
+### Build inputs are pinned (ADR-0031)
+
+Every GitHub Action is pinned to a commit SHA and the Docker base image to a
+digest, so the same commit builds the same bytes and no upstream tag can be
+repointed under us. Dependabot proposes the bumps — a pin nothing updates just
+freezes an unpatched base, which is worse than the tag it replaced.
+
+Pull requests build the Windows and macOS bundles (that's how three WiX errors
+got caught before a release) but **never sign them**: the signing certificate
+is not exposed to pull-request runs at all. Tag builds sign.
+
+`tests/test_supply_chain.py` fails the build if any of that stops being true.
+One thing it can't enforce: someone able to edit a workflow can delete the
+gate. Closing that needs repository settings — a protected Environment for the
+signing secrets and branch protection on `.github/workflows/**`.
 
 ## License
 
