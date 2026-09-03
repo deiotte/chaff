@@ -9,6 +9,7 @@ drift that causes those failures.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -155,3 +156,84 @@ def test_ci_smoke_tests_the_real_artifact(workflow):
     src = (Path(".github/workflows") / workflow).read_text()
     assert "/registry" in src, f"{workflow} must prove the build serves the UI"
     assert "/shutdown" in src, f"{workflow} must prove the Quit path works"
+
+
+# ── WiX invocation (each of these actually broke a CI build) ──────────
+# None of this can be run on Linux, so it is asserted on the source. Each
+# assertion below is a failure that happened, not a hypothetical.
+
+WINDOWS_WORKFLOW = Path(".github/workflows/windows-exe.yml").read_text()
+WXS = (PACKAGING / "msi" / "chaff.wxs").read_text()
+
+
+def _commands(text: str) -> str:
+    """Workflow lines with `#` comments stripped.
+
+    The comments explain the wrong syntax these guards forbid, so matching
+    against the raw file would flag the explanation instead of a real call.
+    """
+    return "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+
+
+WINDOWS_COMMANDS = _commands(WINDOWS_WORKFLOW)
+
+
+def test_wix_extension_version_is_exact_and_matches_the_tool():
+    """`wix extension add` rejects a wildcard — "Invalid extension version in
+    WixToolset.UI.wixext/5.*" — even though `dotnet tool install` accepts one.
+    They must also be the same version: an extension built against a different
+    wix is unsupported."""
+    tool = re.search(r"dotnet tool install --global wix --version (\S+)", WINDOWS_COMMANDS)
+    ext = re.search(r"wix extension add -g WixToolset\.UI\.wixext/(\S+)", WINDOWS_COMMANDS)
+    assert tool and ext, "the wix install/extension steps moved"
+
+    # Both should reference one pinned variable, or two identical literals.
+    versions = set()
+    for match in (tool.group(1), ext.group(1)):
+        if match.startswith("$"):
+            # re.escape already handles the leading `$` of a PowerShell var.
+            pinned = re.search(re.escape(match) + r'\s*=\s*"([^"]+)"', WINDOWS_COMMANDS)
+            assert pinned, f"{match} is used but never assigned"
+            versions.add(pinned.group(1))
+        else:
+            versions.add(match)
+
+    assert len(versions) == 1, f"wix tool and extension versions differ: {versions}"
+    version = versions.pop()
+    assert "*" not in version, "wix extension add rejects wildcard versions"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", version), f"pin an exact version, got {version!r}"
+
+
+def test_named_bindpaths_use_the_supported_syntax():
+    """WiX v4/v5 takes `-b name=path`. `-bindpath:name value` parses as an
+    unnamed bind path, and every !(bindpath.name) in the .wxs then fails to
+    resolve."""
+    assert "-bindpath:" not in WINDOWS_COMMANDS, \
+        "use `-b name=path`, not `-bindpath:name value`"
+
+    declared = set(re.findall(r"-b\s+(\w+)=", WINDOWS_COMMANDS))
+    referenced = set(re.findall(r"!\(bindpath\.(\w+)\)", WXS))
+    missing = referenced - declared
+    assert not missing, f"the .wxs references bind paths the build never defines: {missing}"
+
+
+def test_components_do_not_use_the_removed_star_guid():
+    """WiX v4 removed Component/@Guid='*'; auto-generated GUIDs are now the
+    default and the literal is an error."""
+    assert 'Guid="*"' not in WXS, 'WiX v4+ rejects Guid="*" — omit the attribute'
+
+
+def test_macos_smoke_test_cannot_pass_on_a_crashed_bundle():
+    """A bundle that crashes on launch leaves no process — identical, to a
+    naive wait loop, to one that stopped on request. The check must prove the
+    app *served* something before it can interpret the exit as success."""
+    src = Path(".github/workflows/macos-app.yml").read_text()
+    assert "SERVED=1" in src, "the smoke test must record that the app answered"
+    assert re.search(r'if \[ "\$SERVED" -ne 1 \]', src), \
+        "the smoke test must fail when the app never served"
+
+
+def test_windows_smoke_test_cannot_pass_on_a_crashed_build():
+    """Same invariant on the PowerShell side."""
+    assert 'if (-not $up) { throw' in WINDOWS_COMMANDS, \
+        "the smoke test must fail when the exe never served"

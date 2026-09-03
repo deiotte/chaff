@@ -120,15 +120,22 @@ jobs:
       - name: Build MSI
         shell: pwsh
         run: |
-          dotnet tool install --global wix --version 5.*
-          wix extension add -g WixToolset.UI.wixext/5.*
+          # Pinned, and pinned to the SAME version for both: `wix extension
+          # add` rejects a wildcard ("Invalid extension version in
+          # ...wixext/5.*") even though `dotnet tool install` accepts one, and
+          # an extension built against a different wix version is unsupported.
+          $wixVersion = "5.0.2"
+          dotnet tool install --global wix --version $wixVersion
+          wix extension add -g WixToolset.UI.wixext/$wixVersion
           python packaging/msi/make_license_rtf.py packaging/msi/license.rtf
           $version = "0.1.0.$($env:GITHUB_RUN_NUMBER)"
+          # Named bind paths are `-b name=path` (the .wxs refers to them as
+          # !(bindpath.name)); `-bindpath:name value` is not the v4/v5 syntax.
           wix build packaging/msi/chaff.wxs `
             -ext WixToolset.UI.wixext `
             -d Version=$version `
-            -bindpath:exe dist `
-            -bindpath:msi packaging/msi `
+            -b exe=dist `
+            -b msi=packaging/msi `
             -out dist/chaff.msi
           if (-not (Test-Path "dist/chaff.msi")) { throw "chaff.msi not produced" }
           Get-Item dist/chaff.msi | Format-List Name, Length

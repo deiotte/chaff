@@ -38,16 +38,16 @@
     </StandardDirectory>
 
     <ComponentGroup Id="ChaffFiles" Directory="INSTALLFOLDER">
-      <Component Id="ChaffExe" Guid="*">
+      <Component Id="ChaffExe">
         <File Id="chaff.exe" Source="!(bindpath.exe)\chaff.exe" KeyPath="yes" />
       </Component>
-      <Component Id="Notices" Guid="*">
+      <Component Id="Notices">
         <File Id="THIRD_PARTY_NOTICES.txt" Source="!(bindpath.exe)\THIRD-PARTY-NOTICES.txt" KeyPath="yes" />
       </Component>
     </ComponentGroup>
 
     <ComponentGroup Id="ChaffShortcuts" Directory="ChaffMenuFolder">
-      <Component Id="StartMenuShortcut" Guid="*">
+      <Component Id="StartMenuShortcut">
         <Shortcut Id="ChaffStartMenu"
                   Name="chaff"
                   Description="Build a synthetic demo dataset"

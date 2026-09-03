@@ -54,21 +54,35 @@ jobs:
           export CHAFF_DESKTOP_PORT=8123 CHAFF_NO_BROWSER=1
           "$BIN" &
           APP_PID=$!
+
+          # SERVED must be set before the exit-check below can pass. Without
+          # it a bundle that crashed on launch would look identical to one
+          # that stopped on request: the wait loop would find no process and
+          # report success. The app has to answer first.
+          SERVED=0
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8123/registry >/dev/null 2>&1; then
               echo "bundle serves /registry"
               curl -fsS http://127.0.0.1:8123/registry | python -c "import json,sys; d=json.load(sys.stdin); assert d['desktop'] is True, 'desktop mode not armed in the bundle'; print('desktop mode armed')"
+              SERVED=1
               # Prove the Quit path works in the real bundle, not just in tests.
               curl -fsS -X POST http://127.0.0.1:8123/shutdown
               break
             fi
+            kill -0 $APP_PID 2>/dev/null || { echo "the bundle exited before serving anything"; exit 1; }
             sleep 1
           done
+          if [ "$SERVED" -ne 1 ]; then
+            echo "chaff.app did not serve /registry within 60s"
+            kill $APP_PID 2>/dev/null
+            exit 1
+          fi
+
           for i in $(seq 1 20); do
             kill -0 $APP_PID 2>/dev/null || { echo "app stopped via /shutdown"; exit 0; }
             sleep 1
           done
-          echo "app did not start, or did not stop on /shutdown"; kill $APP_PID 2>/dev/null; exit 1
+          echo "app did not stop on /shutdown"; kill $APP_PID 2>/dev/null; exit 1
 
       # ── Signing + notarization (ADR-0023) ────────────────────────
       # Gated on secrets: a Developer ID certificate needs a paid Apple
