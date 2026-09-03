@@ -13,7 +13,12 @@ from __future__ import annotations
 
 import os
 
-from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules
+# NOTE: PyInstaller is imported inside `collect_extras()`, not here. The lists
+# below are plain data and are what the guards in tests/test_packaging.py
+# check — importing PyInstaller at module scope made this whole module
+# unimportable without it, so those five guards silently *skipped* in CI (the
+# make-check job doesn't install PyInstaller) while passing locally. Tests
+# that skip in CI are the hole ADR-0022 is about; keep this import lazy.
 
 
 def datas_for(root: str) -> list[tuple[str, str]]:
@@ -65,6 +70,12 @@ def collect_extras() -> tuple[list, list, list]:
       discovers providers the same way, so the module graph misses both. It's
       on the core generate path.
     """
+    from PyInstaller.utils.hooks import (
+        collect_all,
+        collect_data_files,
+        collect_submodules,
+    )
+
     pa_datas, pa_binaries, pa_hidden = collect_all("pyarrow")
     datas = pa_datas + collect_data_files("faker")
     hidden = list(pa_hidden) + collect_submodules("faker")

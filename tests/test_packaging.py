@@ -22,14 +22,33 @@ MACOS_SPEC = (PACKAGING / "chaff-macos.spec").read_text()
 
 @pytest.fixture(scope="module")
 def config():
+    """The shared bundle config — importable without PyInstaller on purpose.
+
+    It used to import PyInstaller at module scope, so every guard below
+    skipped in CI (the make-check job doesn't install it) while passing
+    locally: five inert tests reporting success. No skip here now — if this
+    module can't be imported that is a real failure, not a reason to pass.
+    """
     sys.path.insert(0, str(PACKAGING.resolve()))
     try:
         import bundle_config
-    except ImportError as e:  # PyInstaller isn't a runtime dep
-        pytest.skip(f"needs pyinstaller installed: {e}")
     finally:
         sys.path.pop(0)
     return bundle_config
+
+
+def test_bundle_config_imports_without_pyinstaller():
+    """The property that keeps the guards above running in CI.
+
+    PyInstaller is a build-time dependency; the lists these tests check are
+    plain data. If someone moves the import back to module scope, every guard
+    silently starts skipping again — so assert the import stays lazy.
+    """
+    source = (PACKAGING / "bundle_config.py").read_text()
+    header = source.split("def ", 1)[0]
+    assert "from PyInstaller" not in header and "import PyInstaller" not in header, (
+        "PyInstaller must be imported inside collect_extras(), not at module "
+        "scope — a top-level import makes every guard in this file skip in CI")
 
 
 # ── the two specs must bundle the same app ───────────────────────────
