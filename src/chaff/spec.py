@@ -129,6 +129,61 @@ class UpdateSpec(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict, description="Updater-specific parameters.")
 
 
+class ObserverSpec(BaseModel):
+    """One viewpoint onto an entity scene (ADR-0033).
+
+    An entity scene is ground truth: where each thing actually was, tick by
+    tick. An observer is a **sensor's account of it** — the same scene, seen
+    imperfectly, under identifiers of its own choosing.
+
+    Two observers over one scene produce what a cross-source consumer needs
+    and a single feed can never supply: two independent reports of the same
+    real-world object, arriving under different ids, in slightly different
+    places. Whether that consumer can tell they are one thing is the question
+    the pair exists to ask; if they shared an id there would be nothing to ask.
+
+    Each observer renders every `(entity, tick)` snapshot into its own output
+    file. Format and sink stay shared, so this is a property of the scene and
+    not a third axis (INV-2).
+    """
+
+    name: str = Field(..., min_length=1, description="Observer id; also its output filename.")
+    id_pattern: Optional[str] = Field(
+        None,
+        description="Pattern for this observer's entity ids (see the `pattern` generator). "
+                    "Omit to reuse the scene's own ids — which makes the observers agree on "
+                    "identity, and is usually not what you want.",
+    )
+    position_error_m: float = Field(
+        0.0, ge=0.0, le=100_000.0,
+        description="How far this observer may misplace a thing, in metres. Bounded, not Gaussian: "
+                    "every report lands within this radius of the truth, so a fixture's expectations "
+                    "are exact rather than probabilistic.",
+    )
+    lat_column: str = Field("lat", description="Column carrying latitude, perturbed by position_error_m.")
+    lon_column: str = Field("lon", description="Column carrying longitude, perturbed by position_error_m.")
+    reports: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Constant columns this observer adds to every row — what the sensor says "
+                    "about itself rather than about the scene. A unit that knows its horizontal "
+                    "error is six metres reports `{\"ce\": 6.0}`, and two observers with "
+                    "different error radii then disagree honestly instead of both claiming "
+                    "the same accuracy.",
+    )
+    options: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Format options overlaid on `output.options` for this observer's file only. "
+                    "Where a per-observer difference is a property of the encoding rather than of "
+                    "the scene — a clock offset via `base_time`, a different reported type — it "
+                    "belongs here, so the observer stays format-agnostic.",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _name_is_a_safe_filename(cls, v: str) -> str:
+        return _reject_unsafe_name(v, "observer name")
+
+
 class EntitySpec(BaseModel):
     """Stateful entities that evolve over time (Phase 3, ADR-0009).
 
@@ -147,6 +202,20 @@ class EntitySpec(BaseModel):
     )
     tick_column: str = Field("tick", description="Output column carrying the 0-based tick number.")
     updates: list[UpdateSpec] = Field(default_factory=list, description="Per-tick update rules, applied in order.")
+    observers: list[ObserverSpec] = Field(
+        default_factory=list,
+        description="Viewpoints onto this scene (ADR-0033). Empty = one feed of the truth itself; "
+                    "two or more = one file per observer, each an imperfect account of the same "
+                    "entities. Adding observers never changes the underlying scene.",
+    )
+
+    @model_validator(mode="after")
+    def _observer_names_unique(self) -> "EntitySpec":
+        names = [o.name for o in self.observers]
+        dupes = {n for n in names if names.count(n) > 1}
+        if dupes:
+            raise ValueError(f"duplicate observer names: {sorted(dupes)}")
+        return self
 
 
 class DatasetSpec(BaseModel):

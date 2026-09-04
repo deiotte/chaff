@@ -1,0 +1,116 @@
+{
+  "name": "correlated_scene",
+  "description": "PRESET: one scene, two sensors. Eight things move over 40 ticks and two independent feeds report them \u2014 different ids, different position error, one two-second clock offset. The input a cross-source correlator needs, which no single feed can supply. Writes a truth file naming which ids are the same thing; that file is for scoring a consumer, never for feeding one.",
+  "seed": 8675309,
+  "columns": [
+    {
+      "name": "lat",
+      "generator": "lat",
+      "params": {
+        "min": 34.04,
+        "max": 34.1
+      }
+    },
+    {
+      "name": "lon",
+      "generator": "lon",
+      "params": {
+        "min": -118.3,
+        "max": -118.22
+      }
+    },
+    {
+      "name": "hae",
+      "generator": "float_uniform",
+      "params": {
+        "min": 60.0,
+        "max": 140.0
+      }
+    },
+    {
+      "name": "speed",
+      "generator": "float_uniform",
+      "params": {
+        "min": 0.4,
+        "max": 4.5
+      }
+    },
+    {
+      "name": "heading",
+      "generator": "int_range",
+      "params": {
+        "min": 0,
+        "max": 359
+      }
+    },
+    {
+      "name": "battery",
+      "generator": "int_range",
+      "params": {
+        "min": 35,
+        "max": 100
+      }
+    }
+  ],
+  "output": {
+    "format": "cot",
+    "options": {
+      "tick_column": "t",
+      "base_time": "2026-01-01T00:00:00Z",
+      "interval_seconds": 5,
+      "stale_seconds": 60,
+      "type": "a-f-G-U-C",
+      "geopointsrc": "GPS",
+      "altsrc": "GPS"
+    }
+  },
+  "sink": {
+    "sink": "file",
+    "options": {
+      "path": "out/correlated_scene.cot"
+    }
+  },
+  "entity": {
+    "count": 8,
+    "ticks": 40,
+    "id_column": "uid",
+    "id_pattern": "TRUTH-#####",
+    "tick_column": "t",
+    "updates": [
+      {
+        "updater": "movement",
+        "params": {
+          "speed": 0.0002,
+          "turn_stddev": 6
+        }
+      }
+    ],
+    "observers": [
+      {
+        "name": "cot-01",
+        "id_pattern": "ANDROID-#######",
+        "position_error_m": 6.0,
+        "reports": {
+          "ce": 6.0,
+          "le": 9.0
+        },
+        "options": {
+          "takv_version": "5.1.0"
+        }
+      },
+      {
+        "name": "cot-02",
+        "id_pattern": "GATEWAY-######",
+        "position_error_m": 12.0,
+        "reports": {
+          "ce": 12.0,
+          "le": 18.0
+        },
+        "options": {
+          "base_time": "2026-01-01T00:00:02Z",
+          "takv_version": "2.4.1"
+        }
+      }
+    ]
+  }
+}

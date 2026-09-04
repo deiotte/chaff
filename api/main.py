@@ -41,10 +41,12 @@ from . import auth
 from chaff import __version__, library
 from chaff.engine import (
     effective_row_count,
+    encode_observers,
     encode_tables,
     encode_view,
     generate_records,
     generate_tables,
+    observer_views,
     iter_records,
 )
 from chaff.formats import get_encoder, get_extension, get_record_encoder, list_formats
@@ -242,6 +244,16 @@ def preview(spec: DatasetSpec, limit: int = 10):
         capped_entity = spec.entity.model_copy(update={
             "count": min(spec.entity.count, limit), "ticks": min(spec.entity.ticks, limit)})
         capped = spec.model_copy(update={"entity": capped_entity})
+        if spec.entity.observers:
+            # Preview what the FEEDS carry, never the scene behind them. The
+            # underlying truth is the one thing no observer emits, and showing
+            # it here would preview a file that does not exist.
+            try:
+                feeds = {name: rows[:limit] for name, _, rows in observer_views(capped)}
+            except (KeyError, ValueError) as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            first = next(iter(feeds.values()), [])
+            return {"rows": first, "feeds": feeds}
     else:
         capped = spec.model_copy(update={"rows": min(spec.rows, limit)})
     try:
@@ -263,6 +275,10 @@ def generate(spec: DatasetSpec):
     _enforce_row_limit(effective_row_count(spec))
     if spec.tables:
         return _generate_multitable_zip(spec)
+    if spec.entity and spec.entity.observers:
+        # One file per observer plus the truth key — the same shape the CLI
+        # writes, so a download and a `chaff generate` are interchangeable.
+        return _zip_response(spec, encode_observers)
     try:
         rows = generate_records(spec)
         payload = get_encoder(spec.output.format)(encode_view(spec), rows)
@@ -302,8 +318,18 @@ def _generate_multitable_zip(spec: DatasetSpec) -> StreamingResponse:
     the engine's dependency order, so the same spec + seed produces a
     byte-identical archive every time (INV-3) — not just identical members.
     """
+    return _zip_response(spec, encode_tables)
+
+
+def _zip_response(spec: DatasetSpec, encode) -> StreamingResponse:
+    """One request, one file: a deterministic zip holding each member.
+
+    Shared by the multi-table and multi-observer paths — both are "one spec,
+    several files", and a second zip builder would be a second place for the
+    reproducibility pins to drift.
+    """
     try:
-        encoded = encode_tables(spec)
+        encoded = encode(spec)
     except (KeyError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -485,6 +511,13 @@ async def _serve_stream(websocket: WebSocket) -> None:
     if spec.tables:
         await websocket.send_json(
             {"error": "multi-table specs can't be streamed (one file per table); use the CLI"})
+        await websocket.close()
+        return
+
+    if spec.entity and spec.entity.observers:
+        await websocket.send_json(
+            {"error": "observer specs produce one feed per observer; a socket carries one. "
+                      "Stream a single observer by removing the others from the spec."})
         await websocket.close()
         return
     try:
