@@ -1,0 +1,321 @@
+{
+  "name": "vmti_embedded",
+  "description": "PRESET: MISB ST 0903.6 VMTI embedded in an ST 0601 UAS Datalink parent frame (Item 74) \u2014 how the standard is most often actually deployed. Targets are OFFSETS from the frame centre the parent declares, so a child is only half a position and the other half lives in the parent. Some frames deliberately withhold the frame centre, which ST 0903.6 Table 6 makes Required, so a consumer's handling of a non-conforming parent is exercised too.",
+  "seed": 8675309,
+  "columns": [
+    {
+      "name": "lat",
+      "generator": "lat",
+      "params": {
+        "min": 34.04,
+        "max": 34.1
+      }
+    },
+    {
+      "name": "lon",
+      "generator": "lon",
+      "params": {
+        "min": -118.3,
+        "max": -118.22
+      }
+    },
+    {
+      "name": "hae",
+      "generator": "float_uniform",
+      "params": {
+        "min": 55.0,
+        "max": 165.0
+      }
+    },
+    {
+      "name": "sigma_east",
+      "generator": "float_uniform",
+      "params": {
+        "min": 2.5,
+        "max": 28.0
+      }
+    },
+    {
+      "name": "sigma_north",
+      "generator": "float_uniform",
+      "params": {
+        "min": 2.5,
+        "max": 28.0
+      }
+    },
+    {
+      "name": "sigma_up",
+      "generator": "float_uniform",
+      "params": {
+        "min": 4.0,
+        "max": 45.0
+      }
+    },
+    {
+      "name": "speed",
+      "generator": "float_uniform",
+      "params": {
+        "min": 0.3,
+        "max": 4.4
+      }
+    },
+    {
+      "name": "heading",
+      "generator": "int_range",
+      "params": {
+        "min": 0,
+        "max": 359
+      }
+    },
+    {
+      "name": "priority",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 24
+      }
+    },
+    {
+      "name": "confidence",
+      "generator": "int_range",
+      "params": {
+        "min": 55,
+        "max": 99
+      }
+    },
+    {
+      "name": "history",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 60
+      }
+    },
+    {
+      "name": "percent_pixels",
+      "generator": "int_range",
+      "params": {
+        "min": 3,
+        "max": 85
+      }
+    },
+    {
+      "name": "intensity",
+      "generator": "int_range",
+      "params": {
+        "min": 90,
+        "max": 4090
+      }
+    },
+    {
+      "name": "pixel_row",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 1080
+      }
+    },
+    {
+      "name": "pixel_col",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 1920
+      }
+    },
+    {
+      "name": "track_confidence",
+      "generator": "int_range",
+      "params": {
+        "min": 50,
+        "max": 97
+      }
+    },
+    {
+      "name": "detection_status",
+      "generator": "choice_weighted",
+      "params": {
+        "values": [
+          "active_moving",
+          "active_stopped",
+          "active_coasting",
+          "dropped"
+        ],
+        "weights": [
+          0.6,
+          0.25,
+          0.1,
+          0.05
+        ]
+      }
+    },
+    {
+      "name": "conf_vehicle",
+      "generator": "float_uniform",
+      "params": {
+        "min": 55.0,
+        "max": 96.0
+      }
+    },
+    {
+      "name": "conf_car",
+      "generator": "float_uniform",
+      "params": {
+        "min": 35.0,
+        "max": 82.0
+      },
+      "null_rate": 0.35
+    },
+    {
+      "name": "conf_motorcycle",
+      "generator": "float_uniform",
+      "params": {
+        "min": 12.0,
+        "max": 55.0
+      },
+      "null_rate": 0.45
+    },
+    {
+      "name": "conf_person",
+      "generator": "float_uniform",
+      "params": {
+        "min": 10.0,
+        "max": 60.0
+      },
+      "null_rate": 0.5
+    },
+    {
+      "name": "conf_watercraft",
+      "generator": "float_uniform",
+      "params": {
+        "min": 5.0,
+        "max": 35.0
+      },
+      "null_rate": 0.6
+    },
+    {
+      "name": "conf_aircraft",
+      "generator": "float_uniform",
+      "params": {
+        "min": 5.0,
+        "max": 30.0
+      },
+      "null_rate": 0.6
+    },
+    {
+      "name": "total_detected",
+      "generator": "int_range",
+      "params": {
+        "min": 6,
+        "max": 14
+      }
+    },
+    {
+      "name": "parent_frame_centre",
+      "generator": "choice_weighted",
+      "params": {
+        "values": [
+          "declared",
+          "withheld"
+        ],
+        "weights": [
+          0.75,
+          0.25
+        ]
+      }
+    }
+  ],
+  "output": {
+    "format": "klv0601",
+    "options": {
+      "tick_column": "t",
+      "base_time": "2026-01-01T00:00:00Z",
+      "interval_seconds": 5,
+      "system_name": "chaff",
+      "source_sensor": "synthetic-eo",
+      "frame_width": 1920,
+      "frame_height": 1080,
+      "horizontal_fov": 24.0,
+      "vertical_fov": 13.5,
+      "classes": [
+        {
+          "iri": "https://example.invalid/ontology#Vehicle",
+          "confidence_column": "conf_vehicle"
+        },
+        {
+          "iri": "https://example.invalid/ontology#Car",
+          "confidence_column": "conf_car"
+        },
+        {
+          "iri": "https://example.invalid/ontology#Motorcycle",
+          "confidence_column": "conf_motorcycle"
+        },
+        {
+          "iri": "https://example.invalid/ontology#Person",
+          "confidence_column": "conf_person"
+        },
+        {
+          "iri": "https://example.invalid/ontology#Watercraft",
+          "confidence_column": "conf_watercraft"
+        },
+        {
+          "iri": "https://example.invalid/ontology#Aircraft",
+          "confidence_column": "conf_aircraft"
+        }
+      ],
+      "frame_column": "t",
+      "frame_center_lat": 34.07,
+      "frame_center_lon": -118.26,
+      "frame_center_elevation": 210.0,
+      "uas_ls_version": 1,
+      "withhold_frame_center_column": "parent_frame_centre"
+    }
+  },
+  "sink": {
+    "sink": "file",
+    "options": {
+      "path": "out/vmti_embedded.klv"
+    }
+  },
+  "entity": {
+    "count": 6,
+    "ticks": 40,
+    "id_column": "target_id",
+    "tick_column": "t",
+    "updates": [
+      {
+        "updater": "movement",
+        "params": {
+          "speed": 0.0002,
+          "turn_stddev": 8
+        }
+      },
+      {
+        "updater": "drift",
+        "params": {
+          "column": "total_detected",
+          "stddev": 2.5,
+          "min": 6,
+          "max": 40,
+          "precision": 0
+        }
+      },
+      {
+        "updater": "lifecycle",
+        "params": {
+          "column": "parent_frame_centre",
+          "transitions": {
+            "declared": {
+              "declared": 0.85,
+              "withheld": 0.15
+            },
+            "withheld": {
+              "declared": 0.55,
+              "withheld": 0.45
+            }
+          }
+        }
+      }
+    ]
+  }
+}

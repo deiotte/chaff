@@ -409,6 +409,18 @@ found it reached 6 of the 12 fields that reader maps, and fabricated one.
       no longer reach the wire. All 12 mapped fields now reachable; verified by
       decoding the preset's 480 events with a real reader — 0 refusals, 0
       anomalies.
+- [x] **Embedded VMTI: the other half of the position (ADR-0036).** A VMTI set
+      normally travels inside an ST 0601 UAS Datalink frame as Item 74, with
+      targets written as *offsets* from the frame centre the parent declares —
+      so an embedded child is only half a position and the other half lives in
+      a different Local Set. New `klv0601` format (a separate one: the
+      Universal Label differs, so a decoder for one refuses the other), sharing
+      the child encoder with `klv` so the two framings cannot drift.
+      `withhold_frame_center_column` writes a deliberately non-conforming
+      parent, changing the parent alone so the child bytes stay identical and
+      the difference is provably the parent's. Angle and elevation mappings
+      pinned byte-for-byte to the consuming repo's own builder; 240
+      observations from 40 frames, 0 refusals, positions within one quantum.
 - [x] **Observers: one scene, several accounts of it (ADR-0033).** An entity
       spec modelled a scene and then emitted it *as if* it were a feed, which
       works right up until a consumer has two inputs. `EntitySpec.observers`
