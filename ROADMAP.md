@@ -409,6 +409,20 @@ found it reached 6 of the 12 fields that reader maps, and fabricated one.
       no longer reach the wire. All 12 mapped fields now reachable; verified by
       decoding the preset's 480 events with a real reader — 0 refusals, 0
       anomalies.
+- [x] **When it happened (ADR-0040).** Time is the one dimension where two
+      different faults wear the same word: a clock SET WRONG shifts every
+      instant equally, so the feed stays ordered and its intervals stay exact,
+      while a feed OUT OF ORDER carries instants each individually correct in
+      the wrong sequence. The first is invisible to an ordering check, the
+      second to a value check. `scene_truth` gains `event_times` (one list per
+      tick, because every entity in a tick shares its instant — which is why a
+      within-tick reorder is unobservable) and `observer_clock_offset_ms`, the
+      offset each observer DECLARES via `base_time`, since two feeds with
+      clocks apart is legitimate scene design. `ObserverSpec.clock_error_s` is
+      the undeclared remainder and is recorded nowhere. The preset puts PDT on
+      the wire under a UTC label for a Los Angeles scene: measured through the
+      consuming scorer, 25,200,000 ms out and ZERO out-of-order steps, with
+      every older gate green.
 - [x] **Kinematics, and a unit fault to test them with (ADR-0039).** ADR-0038
       closed by noting a feed with perfect positions and backwards velocities
       was still invisible. That gap is not a smaller version of the last one: a

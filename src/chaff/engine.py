@@ -17,12 +17,14 @@ import json
 import math
 import os
 import random
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
 from faker import Faker
 
 from .formats import get_encoder, get_extension, get_record_encoder
+from .formats._timing import event_time as _event_time, parse_time
 from .generators import GenContext, get_generator
 from .sinks import (
     get_sink,
@@ -519,10 +521,49 @@ def observer_views(spec: DatasetSpec) -> Iterator[tuple[str, DatasetSpec, list[d
             "columns": list(spec.columns) + extra,
             "output": spec.output.model_copy(update={
                 "format": observer.format or spec.output.format,
-                "options": {**spec.output.options, **observer.options},
+                "options": _observer_options(spec, observer),
             }),
         })
         yield observer.name, view, list(iter_observed_rows(spec, observer))
+
+
+def _observer_options(spec: DatasetSpec, observer: ObserverSpec) -> dict[str, Any]:
+    """This observer's output options, including any clock it is wrong about.
+
+    A `base_time` in `observer.options` is a **declared** offset: legitimate
+    scene design, recorded in the answer key, and a consumer can be held to it.
+    `clock_error_s` is the undeclared remainder — a clock nobody knows is
+    wrong — and it is folded in here so it reaches the encoder without ever
+    reaching the key.
+
+    It shifts every timestamp by the same amount, so the feed stays ordered and
+    its intervals stay exact. Only the absolute instant moves, and only a
+    comparison against the truth can see it (chaff ADR-0040).
+    """
+    options = {**spec.output.options, **observer.options}
+    if observer.clock_error_s:
+        base = parse_time(options.get("base_time", "2025-01-01T00:00:00Z"))
+        options["base_time"] = (
+            base + timedelta(seconds=float(observer.clock_error_s))
+        ).isoformat().replace("+00:00", "Z")
+    return options
+
+
+def declared_clock_offset_ms(spec: DatasetSpec, observer: ObserverSpec) -> int:
+    """How far this observer's clock is DECLARED to be from the scene's, in ms.
+
+    The scene's `base_time` is when things really happened; an observer's
+    override is when this sensor says they did. Two feeds of one scene carrying
+    a deliberate offset is the case the observers exist to produce, so the key
+    records the offset rather than pretending it is zero — a consumer is held
+    to the clock its feed declares, exactly as it is held to the position error
+    its feed declares.
+
+    `clock_error_s` is deliberately **not** included. That is the fault.
+    """
+    scene_base = parse_time(spec.output.options.get("base_time", "2025-01-01T00:00:00Z"))
+    observer_base = parse_time(observer.options.get("base_time", scene_base.isoformat()))
+    return round((observer_base - scene_base).total_seconds() * 1000)
 
 
 def _distinct(ids: list[Any], source: str) -> list[Any]:
@@ -594,7 +635,37 @@ def scene_truth(spec: DatasetSpec) -> dict[str, Any]:
                         "a unit or convention error at worst. A wrong scale here is the archetypal "
                         "invisible fault: every value stays finite, in range and plausible.",
         "kinematics": _truth_kinematics(spec),
+        "//event_times": "When each tick really happened, epoch milliseconds, in tick order. The "
+                         "SCENE's clock — what an observer's feed says is that observer's claim, "
+                         "and the two differing by more than it declares is a fault no ordering "
+                         "check can see, because a wrong clock shifts every timestamp equally.",
+        "event_times": _truth_event_times(spec),
+        "//observer_clock_offset_ms": "How far each observer's clock is DECLARED to be from the "
+                                      "scene's. Two feeds of one scene carrying a deliberate "
+                                      "offset is the case observers exist to produce, so the key "
+                                      "records it rather than pretending it is zero — a consumer "
+                                      "is held to the clock its feed declares, exactly as it is "
+                                      "held to the position error its feed declares.",
+        "observer_clock_offset_ms": {
+            o.name: declared_clock_offset_ms(spec, o) for o in ent.observers
+        },
     }
+
+
+def _truth_event_times(spec: DatasetSpec) -> list[int]:
+    """The real instant of each tick, epoch milliseconds, in tick order.
+
+    One list rather than one per entity: every entity in a tick shares that
+    tick's instant, which is what makes a within-tick reordering invisible in
+    the time sequence and is worth knowing when reading a gate that checks one.
+    """
+    ent = spec.entity
+    seen: dict[Any, int] = {}
+    for row in iter_entity_rows(spec):
+        tick = row.get(ent.tick_column)
+        if tick is not None and tick not in seen:
+            seen[tick] = round(_event_time(spec, row).timestamp() * 1000)
+    return [seen[k] for k in sorted(seen)]
 
 
 def _truth_kinematics(spec: DatasetSpec) -> dict[str, list[list[float | None]]]:

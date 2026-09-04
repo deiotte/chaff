@@ -286,6 +286,60 @@ def test_misreporting_does_not_disturb_position():
     assert [(r["lat"], r["lon"]) for r in rows] == [(r["lat"], r["lon"]) for r in truth]
 
 
+def test_truth_carries_when_each_tick_really_happened():
+    spec = scene([{"name": "a", "id_pattern": "A-####"}])
+    truth = scene_truth(spec)
+    assert len(truth["event_times"]) == spec.entity.ticks
+    assert truth["event_times"] == sorted(truth["event_times"])
+    assert all(isinstance(t, int) for t in truth["event_times"])
+
+
+def timed_scene(observers):
+    """A scene that states its own clock, which `scene()` leaves to the default."""
+    return load_spec({
+        "name": "timed", "seed": 11,
+        "columns": [{"name": "lat", "generator": "lat"}, {"name": "lon", "generator": "lon"}],
+        "output": {"format": "ndjson", "options": {
+            "base_time": "2026-01-01T00:00:00Z", "interval_seconds": 5, "tick_column": "t"}},
+        "entity": {"count": 2, "ticks": 3, "id_column": "uid", "tick_column": "t",
+                   "id_pattern": "TRUTH-####", "observers": observers},
+    })
+
+
+def test_truth_records_a_declared_clock_offset_and_not_an_undeclared_one():
+    """**The distinction the whole round rests on.**
+
+    A `base_time` override is scene design — two sensors of one scene with clocks apart is what
+    observers exist to produce — so the key records it and a consumer is held to it. A
+    `clock_error_s` is a clock nobody knows is wrong, and recording it would hand the consumer the
+    answer to the question the fixture asks.
+    """
+    spec = timed_scene([{"name": "declared", "id_pattern": "D-##",
+                         "options": {"base_time": "2026-01-01T00:00:02Z"}},
+                        {"name": "broken", "id_pattern": "B-##", "clock_error_s": -25200.0}])
+    offsets = scene_truth(spec)["observer_clock_offset_ms"]
+    assert offsets["declared"] == 2000
+    assert offsets["broken"] == 0, "an undeclared error must not appear in the answer key"
+
+
+def test_a_clock_error_shifts_every_instant_equally():
+    """Which is why no ordering check can see one: the sequence survives it perfectly."""
+    from chaff.formats._timing import parse_time
+    spec = timed_scene([{"name": "honest", "id_pattern": "H-##"},
+                        {"name": "broken", "id_pattern": "B-##", "clock_error_s": -25200.0}])
+    bases = {n: parse_time(v.output.options["base_time"]) for n, v, _ in observer_views(spec)}
+    assert (bases["honest"] - bases["broken"]).total_seconds() == 25200.0
+
+
+def test_a_clock_error_disturbs_nothing_but_the_clock():
+    """Position, speed and course are all left alone — one clock wrong, everything else right."""
+    spec = kinematic_scene([{"name": "a", "position_error_m": 0.0, "clock_error_s": 3600.0}])
+    truth = generate_entity_rows(spec)
+    rows = next(r for n, _, r in observer_views(spec))
+    assert [(r["lat"], r["lon"], r["speed"]) for r in rows] == \
+           [(r["lat"], r["lon"], r["speed"]) for r in truth]
+
+
 def test_truth_is_never_a_feed():
     """It ships beside the feeds as its own member, and no feed contains it."""
     members = encode_observers(scene([{"name": "a", "id_pattern": "A-####"}]))
