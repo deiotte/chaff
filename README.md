@@ -100,12 +100,12 @@ spec in a demo.
 
 ### Desktop downloads
 
-Check the [Releases asset list](https://github.com/deiotte/chaff/releases)
-for the version you intend to run. Release workflows build these packages;
-that does **not** mean every published release already contains all of them
-or the latest changes on `main`.
+The current [v0.2.0 release](https://github.com/deiotte/chaff/releases/tag/v0.2.0)
+publishes all three packages below. Release binaries reflect their tag;
+`main` can contain newer formats and presets, so use the source path when you
+need work merged after that release.
 
-| Asset, when attached | How to use it |
+| Asset | How to use it |
 |---|---|
 | `chaff.exe` | Run the standalone Windows executable; it opens the browser UI. |
 | `chaff.msi` | Per-user Windows installer with a Start-menu shortcut and uninstall entry. |
@@ -174,7 +174,12 @@ change `output.format` for a different encoding.
 - **Linked geography:** an opt-in country anchor supplies consistent city,
   timezone, currency, and position fields. See
   [crm_contacts_geo](examples/crm_contacts_geo.json).
-- **Reusable specs:** 12 shipped presets, saved schemas, previews, downloads,
+- **Correlated scenes:** one moving scene can be rendered through several
+  observers, each with its own identifiers, bounded position error, and output
+  format. A separate truth file records identity and position for scoring. See
+  [correlated_scene](examples/correlated_scene.json) and
+  [correlated_multikind](examples/correlated_multikind.json).
+- **Reusable specs:** 18 shipped presets, saved schemas, previews, downloads,
   and whole-spec round trips through the browser editors.
 
 ### File formats and streaming compatibility
@@ -185,13 +190,17 @@ record at a time:
 | Formats | File/batch output | Push-stream output | Extra dependencies |
 |---|---|---|---|
 | CSV, JSON, NDJSON, CoT | Yes | Yes | None for encoding |
+| VMTI KLV (`klv`, `klv0601`) | Yes | Yes, one target per packet | None for encoding |
 | TSV, SQL, XML | Yes | Not implemented | None |
 | XLSX, Parquet, Avro | Yes | Not implemented | `formats-extra` |
 
 The six sinks are `file`, `http`, `kafka`, `mqtt`, `tcp`, and `udp`. HTTP,
 Kafka, and MQTT need the `streaming` extra; raw TCP/UDP use the standard
 library. Streamed JSON is a sequence of individually encoded records, not one
-batch JSON array. Multi-table output is file/batch-only.
+batch JSON array. Multi-table and multi-observer output are file/batch-only.
+KLV specs using `frame_column` deliberately refuse push streaming because a
+multi-target frame spans several generated records; dropping the option emits
+one target per packet instead of silently changing the requested framing.
 
 ### CoT position feeds
 
@@ -219,6 +228,200 @@ Times come from the spec/data, not the wall clock. The preset starts at
 `output.options.base_time` appropriate to your test before sending it. The
 synthetic marker is configurable, not an enforced isolation mechanism. Keep
 fixtures separate from operational feeds and validate your receiving system.
+
+#### Point it at a TAK Server
+
+First identify the exact input that TAK exposes. chaff's `tcp` and `udp` sinks
+are raw sockets: they add no TLS, client certificate, authentication message,
+or TAK protocol negotiation. TCP opens one connection and writes complete CoT
+events head-to-tail; UDP sends one event per datagram. Every event ends with a
+newline, but TAK's streaming CoT parser finds message boundaries at
+`</event>`, so it does not depend on that newline.
+
+| TAK input | Point chaff at | Operational meaning |
+|---|---|---|
+| Plain `protocol="tcp"` | `sink: "tcp"`, using that input's host and port | Recommended direct path for an isolated lab input. TCP connection failures are reported. |
+| Plain `protocol="udp"` | `sink: "udp"`, using that input's host and port | One CoT event per datagram. UDP cannot confirm that the server or application received it. |
+| `protocol="tls"` with X.509 client auth | A loopback TLS relay, then point chaff TCP at the relay | chaff cannot connect directly because its raw TCP sink has no TLS or certificate options. |
+| CoT-over-protobuf, gRPC, QUIC, or another negotiated input | A compatible adapter | chaff emits XML CoT; it does not negotiate these protocols. |
+
+The upstream TAK Server example enables TLS on 8089 and leaves plaintext TCP
+and UDP on 8087 commented out. Those are examples, not a promise about your
+server: confirm the live input in **Configuration → Input Definitions** or
+with its administrator. See the official
+[TAK Server input example](https://github.com/TAK-Product-Center/Server/blob/main/src/takserver-core/example/CoreConfig.example.docker.xml)
+and its
+[streaming CoT parser](https://github.com/TAK-Product-Center/Server/blob/main/src/takserver-core/src/main/java/com/bbn/marti/nio/protocol/connections/StreamingCotProtocol.java).
+
+If you administer an isolated TAK test environment, a dedicated plaintext
+input can look like this in `CoreConfig.xml` (or be created in the input UI):
+
+```xml
+<input _name="chaff-lab-tcp" protocol="tcp" port="18087" auth="anonymous"/>
+```
+
+Use a unique port, restrict it at the host/network boundary to the chaff
+sender, and apply the TAK group/filter rules your test clients require. Do not
+expose an anonymous plaintext input to an untrusted network. Input changes and
+restart requirements depend on how your TAK Server is managed.
+
+For a normal mutual-TLS input, put TLS outside chaff. For example, a local
+[`stunnel` client](https://www.stunnel.org/howto.html) can own the TAK
+certificate while chaff sends plain CoT only to loopback:
+
+```ini
+; chaff-tak.conf -- stunnel 5 client mode
+foreground = yes
+client = yes
+
+[chaff-to-tak]
+accept = 127.0.0.1:19089
+connect = tak.example.test:8089
+cert = /secure/path/chaff-client-cert.pem
+key = /secure/path/chaff-client-key.pem
+CAfile = /secure/path/tak-ca.pem
+verifyChain = yes
+checkHost = tak.example.test
+```
+
+Start the relay with `stunnel ./chaff-tak.conf`, then use
+`127.0.0.1:19089` as chaff's TCP destination. Obtain a test client identity,
+private key, and CA chain from the TAK administrator; the hostname in
+`checkHost` must match the server certificate. If the credentials were issued
+as PKCS#12, use the administrator's approved PEM-export procedure. Keep keys,
+passwords, and relay configuration out of the repository and saved specs.
+
+Now create a run-specific spec. Run this immediately before each test so its
+event times are current. The four AOI variables are optional; without them the
+tracks appear in the preset's Los Angeles rectangle.
+
+```bash
+# Direct lab TCP example. For the TLS relay, use 127.0.0.1 and 19089.
+export CHAFF_TAK_HOST=tak-lab.example.test
+export CHAFF_TAK_PORT=18087
+export CHAFF_TAK_SINK=tcp       # tcp or udp
+
+# Optional test area of interest:
+# export CHAFF_TAK_MIN_LAT=34.00 CHAFF_TAK_MAX_LAT=34.05
+# export CHAFF_TAK_MIN_LON=-118.30 CHAFF_TAK_MAX_LON=-118.20
+# export CHAFF_TAK_STEP_DEG=0.0002
+
+python - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+spec = json.loads(Path("examples/cot_tracks.json").read_text())
+spec["name"] = "cot-to-tak"
+
+columns = {column["name"]: column for column in spec["columns"]}
+overrides = {
+    "CHAFF_TAK_MIN_LAT": ("lat", "min"),
+    "CHAFF_TAK_MAX_LAT": ("lat", "max"),
+    "CHAFF_TAK_MIN_LON": ("lon", "min"),
+    "CHAFF_TAK_MAX_LON": ("lon", "max"),
+}
+for variable, (column, bound) in overrides.items():
+    if variable in os.environ:
+        columns[column]["params"][bound] = float(os.environ[variable])
+
+# Make the test identities obvious and keep event time aligned with delivery.
+columns["callsign"]["params"]["pattern"] = "CHAFF-RAVEN-##"
+spec["entity"]["id_pattern"] = "CHAFF-####"
+movement = next(update for update in spec["entity"]["updates"]
+                if update["updater"] == "movement")
+movement["params"]["speed"] = float(
+    os.environ.get("CHAFF_TAK_STEP_DEG", "0.0002"))
+options = spec["output"]["options"]
+options["base_time"] = datetime.now(timezone.utc).replace(
+    microsecond=0).isoformat().replace("+00:00", "Z")
+
+entity_count = int(spec["entity"]["count"])
+ticks = int(spec["entity"]["ticks"])
+interval = float(options["interval_seconds"])
+sink = os.environ.get("CHAFF_TAK_SINK", "tcp").lower()
+if sink not in {"tcp", "udp"}:
+    raise SystemExit("CHAFF_TAK_SINK must be tcp or udp")
+
+sink_options = {
+    "host": os.environ["CHAFF_TAK_HOST"],
+    "port": int(os.environ["CHAFF_TAK_PORT"]),
+    "rate": entity_count / interval,
+    "max_records": entity_count * ticks,
+    "duration": ticks * interval + float(options["stale_seconds"]),
+}
+if sink == "tcp":
+    sink_options["timeout"] = 10
+spec["sink"] = {"sink": sink, "options": sink_options}
+
+Path("cot-to-tak.json").write_text(json.dumps(spec, indent=2) + "\n")
+print("wrote cot-to-tak.json with current UTC event time")
+PY
+
+chaff validate cot-to-tak.json
+chaff generate cot-to-tak.json
+```
+
+The latitude/longitude bounds are starting positions. The runbook reduces the
+preset's simple movement step to `0.0002` degrees per tick so tracks stay near
+that AOI; `CHAFF_TAK_STEP_DEG` can override it. This remains a map-integration
+fixture, not a physical motion model: the separately generated CoT `speed`
+field is not derived from positional displacement.
+
+The preset advances one tick every five event-seconds and reports eight
+entities per tick, so the script sends at `8 / 5 = 1.6` events per second.
+Using one event per second would make event time fall behind wall time until
+later reports arrived after their own 30-second stale deadline. The generated
+run is capped at 480 records and 330 seconds; normal completion takes about
+five minutes.
+
+Verify the whole path, not just the chaff receipt:
+
+1. Before sending, connect a TAK client that can see the input's assigned
+   group and zoom to the selected AOI.
+2. Watch the TAK input's read/message counters or server logs while chaff is
+   running.
+3. Expect eight stable `CHAFF-RAVEN-…` markers, each updated 60 times. The
+   `<takv platform="chaff">` detail provides a second synthetic-data marker.
+4. After the final report, expect clients to remove or age the markers after
+   the 30-second stale window according to their own policy.
+
+`sent 480 record(s)` means the local TCP socket accepted 480 encoded events;
+it is not proof that TAK parsed, routed, persisted, or displayed them. With
+UDP, even that transport-level signal is unavailable.
+
+### Correlated scenes and VMTI KLV
+
+Observer-aware entity specs separate a scene from what each sensor claims
+about it. A run writes one file per observer plus `-truth.json`; the truth file
+maps observer-local identifiers to scene entities, records scene positions per
+tick, and carries each observer's declared error radius. It is an evaluation
+artifact—never an input to the consumer being scored.
+
+The binary sensor presets cover several distinct shapes:
+
+| Preset | What it exercises |
+|---|---|
+| [vmti_targets](examples/vmti_targets.json) | Standalone MISB ST 0903.6 VMTI KLV, one target per packet. |
+| [vmti_frames](examples/vmti_frames.json) | Multi-target frames and the detected-versus-reported culling ratio. |
+| [vmti_embedded](examples/vmti_embedded.json) | VMTI as Item 74 in a minimal ST 0601 parent, using target offsets from the frame centre; some frames deliberately omit that required centre. |
+| [correlated_multikind](examples/correlated_multikind.json) | The same scene as CoT XML and standalone VMTI KLV, with different sensor-local IDs and a truth key. |
+| [displaced_parent](examples/displaced_parent.json) | A deliberately wrong ST 0601 frame centre that decodes cleanly but moves every embedded target away from truth. |
+
+`klv` and `klv0601` are separate format IDs because their Universal Labels and
+framing differ. The embedded encoder supplies the parent metadata VMTI needs;
+it is not a general ST 0601 UAS Datalink encoder. Multi-target files cannot use
+a streaming sink, and observer scenes are file/batch-only; isolate one
+observer and remove `frame_column` when a consumer needs packet-at-a-time
+delivery.
+
+Repository tests pin KLV structure, checksums, mappings, and reference vectors.
+The ADRs also report end-to-end decode measurements against a separate
+consuming implementation, but that consumer and its interoperability gate are
+not bundled with chaff or run by `make check`. Start with
+[ADR-0034](docs/adr/0034-vmti-klv-and-mixed-scenes.md) and
+[ADR-0036](docs/adr/0036-embedded-vmti.md) for the conformance boundary.
 
 ## Live streams
 
@@ -340,9 +543,14 @@ safely. See [ADR-0028](docs/adr/0028-output-injection-guards.md).
   per-job user ownership. A blocked sink can retain its slot.
 - Only drafting has a request-rate limiter. Derived-expression budgets and
   stream caps do not provide whole-service resource isolation.
-- Synthetic values and simple motion/state models do not establish measured
-  realism, load capacity, or operational TAK/broker interoperability. chaff
-  does not anonymize a real dataset or exercise malformed-input fuzzing paths.
+- Raw TCP/UDP delivery has no TLS, client-certificate, login, or application
+  acknowledgement support. Use a restricted TAK lab input or an authenticated
+  relay; do not treat a successful socket write as receiver acceptance.
+- Synthetic values, simple motion/state, and bounded uniform observer error do
+  not establish measured sensor realism, load capacity, or operational
+  TAK/broker interoperability. There is no sensor bias, correlated error,
+  dropout, or missed-detection model. chaff does not anonymize a real dataset
+  or exercise general malformed-input fuzzing paths.
 
 ### Reproducibility and build integrity
 
@@ -372,7 +580,11 @@ See [ADR-0031](docs/adr/0031-build-input-integrity.md).
 | XLSX, Parquet, or Avro fails with a missing dependency | Add `formats-extra` to the source install or Docker `CHAFF_EXTRAS` and rebuild. |
 | AI drafting reports a missing SDK or key | Install the provider's extra and supply its key; Google is not in the default image. |
 | Drafting returns 413, 429, or 503 | Shorten the description, wait for the rate window, or check whether drafting is disabled. |
-| A live CoT consumer drops the preset | Check its fixed base time, stale window, destination/framing, and your receiver's acceptance rules. |
+| TCP to a TAK port is refused or reset immediately | Confirm the configured input protocol. Plain chaff TCP cannot negotiate the common mutual-TLS input; use the TLS relay path. |
+| chaff reports `sent`, but TAK shows no markers | Check the input's read/message counters, server parsing logs, group visibility, event time/stale window, AOI, and client filters. A socket receipt is not end-to-end acceptance. |
+| Early CoT markers appear but later updates disappear | Refresh `base_time` immediately before the run and pace at `entity.count / interval_seconds`; otherwise reports can arrive after their stale time. |
+| UI Push rejects an internal TAK hostname | Add the exact destination to `CHAFF_STREAM_ALLOWED_HOSTS` on a token-enabled deployment. The source CLI does not apply the API egress policy. |
+| Docker cannot reach a TAK server at `localhost` | `localhost` inside the chaff container is the container. Use a routable TAK/relay address on the container's network. |
 
 ## Engineering evidence and development
 
@@ -415,9 +627,10 @@ specified in the [Makefile](Makefile).
 Read [AGENTS.md](AGENTS.md) for the build invariants and
 [ROADMAP.md](ROADMAP.md) for status. Shared-deployment credibility still needs
 complete stream-secret handling, service-wide resource controls, release/version
-alignment, and stronger build/signing governance. Sensor-format work continues:
-**MISB ST 0903.6 (VMTI) is planned, not implemented**; gRPC/protobuf remain
-deferred.
+alignment, and stronger build/signing governance. Sensor-format work now covers
+standalone and embedded VMTI, multi-target frames, multi-observer scenes, and
+geometry-bearing answer keys, but the sensor models and ST 0601 parent remain
+deliberately narrow. gRPC/protobuf remain deferred.
 
 ## License
 
