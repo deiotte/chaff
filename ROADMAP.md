@@ -409,6 +409,18 @@ found it reached 6 of the 12 fields that reader maps, and fabricated one.
       no longer reach the wire. All 12 mapped fields now reachable; verified by
       decoding the preset's 480 events with a real reader — 0 refusals, 0
       anomalies.
+- [x] **An answer key with geometry (ADR-0038).** ADR-0037 closed by naming
+      what its key could not do: score *where* a consumer put things, only
+      whether it paired them. That gap is exactly the shape of the displaced
+      parent — a uniform displacement leaves relative geometry, and therefore
+      every pairing, untouched. `scene_truth` now carries the scene's own
+      positions per entity per tick plus each observer's declared
+      `position_error_m`, so a consumer is held to the accuracy *the feed
+      claimed about itself*. Bounded displacement makes the bound exact rather
+      than statistical. Measured through the consuming scorer: honest feeds
+      land just under their radius (5.95 against 6 m, 11.93 against 12 m) and
+      the displaced parent reads 260.53 m against a claim of 12 — caught from
+      ONE feed, with no correlator involved.
 - [x] **A parent that lies about where it is looking (ADR-0037).** ADR-0036
       modelled a parent that *withholds* its frame centre, which a consumer
       catches easily. This models one that supplies the WRONG centre, which no

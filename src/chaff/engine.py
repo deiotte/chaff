@@ -560,16 +560,43 @@ def scene_truth(spec: DatasetSpec) -> dict[str, Any]:
             identities.setdefault(str(real), {})[observer.name] = observed
     return {
         "//": "Ground truth for a chaff scene: which observer-side ids are the same "
-              "real entity. An evaluation artifact (chaff ADR-0033) — no sensor emits "
-              "this, and a consumer handed it has been given the answer to the question "
-              "it exists to answer.",
+              "real entity, and where each of them actually was. An evaluation artifact "
+              "(chaff ADR-0033, ADR-0038) — no sensor emits this, and a consumer handed "
+              "it has been given the answer to the question it exists to answer.",
         "scene": spec.name,
         "seed": spec.seed,
         "entities": ent.count,
         "ticks": ent.ticks,
         "observers": [o.name for o in ent.observers],
         "identities": identities,
+        "//observer_error_m": "What each observer CLAIMS its position error is, in metres. "
+                              "Bounded rather than Gaussian, so every one of its reports lands "
+                              "inside this radius of the truth below — which is what lets a "
+                              "consumer be held to an exact bound rather than a statistical one.",
+        "observer_error_m": {o.name: o.position_error_m for o in ent.observers},
+        "//positions": "Where each entity really was, [lat, lon] per tick in tick order, keyed "
+                       "by the scene's own id. Paired with `identities` this turns a decoded "
+                       "position into a distance from the truth — which is the only way to see "
+                       "a fault that leaves every packet well-formed and every value in range.",
+        "positions": _truth_positions(spec),
     }
+
+
+def _truth_positions(spec: DatasetSpec) -> dict[str, list[list[float]]]:
+    """Every entity's real position, per tick, before any observer saw it.
+
+    The *scene's* geometry, never an observer's: an observer's account is
+    displaced within its own error radius, and scoring one displaced account
+    against another would measure the difference between two guesses rather
+    than the distance from either to the truth.
+    """
+    ent = spec.entity
+    tracks: dict[str, list[list[float]]] = {}
+    for row in iter_entity_rows(spec):
+        lat, lon = row.get("lat"), row.get("lon")
+        if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+            tracks.setdefault(str(row[ent.id_column]), []).append([float(lat), float(lon)])
+    return tracks
 
 
 def table_views(spec: DatasetSpec) -> Iterator[tuple[str, DatasetSpec, list[dict[str, Any]]]]:
