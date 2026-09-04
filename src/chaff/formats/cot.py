@@ -12,17 +12,29 @@ They are derived from the **data**, never the wall clock — from a
 `time_column` if present, else `base_time + tick * interval_seconds`, else a
 fixed `base_time`. Same spec + seed = same bytes.
 
+**Absence is emitted as absence** (ADR-0032). CoT's numeric fields have no
+"missing" encoding, so the standard reserves the literal 9999999 to mean *I
+do not know*. A consumer reads that as "no value"; it reads a 0.0 as a
+measurement of zero. Every optional numeric here is therefore either the
+row's real value or the sentinel — never a fabricated default.
+
 options:
-  lat_column ('lat'), lon_column ('lon'), hae_column (optional height),
-  uid_column (auto: track_id/entity_id/uid/id), callsign_column (auto:
-  callsign, else the uid), tick_column ('tick'/'t' auto-detected),
-  type ('a-f-G-U-C'), how ('m-g'),
-  time_column (optional ISO timestamp), base_time ('2025-01-01T00:00:00Z'),
-  interval_seconds (1.0), stale_seconds (300).
+  position   lat_column ('lat'), lon_column ('lon'), hae_column ('hae'),
+             ce_column ('ce'), le_column ('le')
+  identity   uid_column (auto: track_id/entity_id/uid/id), callsign_column
+             (auto: callsign, else the uid)
+  kinematics speed_column (auto: speed), course_column (auto: course/heading)
+  reporter   battery_column (auto: battery), geopointsrc, altsrc,
+             takv_platform ('chaff' — see `_detail_element`), takv_version
+  event      type ('a-f-G-U-C'), how ('m-g')
+  time       time_column (optional ISO timestamp), tick_column ('tick'/'t'
+             auto-detected), base_time ('2025-01-01T00:00:00Z'),
+             interval_seconds (1.0), stale_seconds (300)
 """
 
 from __future__ import annotations
 
+import math
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -32,6 +44,16 @@ from ..spec import DatasetSpec
 
 _UID_FALLBACKS = ("track_id", "entity_id", "uid", "id")
 _TICK_FALLBACKS = ("tick", "t")
+_SPEED_FALLBACKS = ("speed",)
+_COURSE_FALLBACKS = ("course", "heading")
+_BATTERY_FALLBACKS = ("battery",)
+
+#: CoT's literal for "this value is not known", used in `hae`, `ce` and `le`.
+#:
+#: A real number in a field that otherwise holds real numbers. Emitting it is
+#: how an absent column stays absent to a consumer: a receiver maps the
+#: sentinel back to "no value", where a 0.0 would arrive as a measurement.
+UNKNOWN_VALUE_SENTINEL = 9999999.0
 
 
 def _opt(spec: DatasetSpec, key: str, default: Any) -> Any:
@@ -66,10 +88,95 @@ def _event_time(spec: DatasetSpec, row: dict) -> datetime:
 
 
 def _num(value: Any, default: float = 0.0) -> float:
+    """A required numeric, falling back to `default`.
+
+    Non-finite is treated as unparseable: a NaN formats as the literal `nan`,
+    which is not a number any CoT consumer can read, and an infinity is not a
+    position. Neither should reach the wire.
+    """
     try:
-        return float(value)
+        f = float(value)
     except (TypeError, ValueError):
         return default
+    return f if math.isfinite(f) else default
+
+
+def _optional_num(spec: DatasetSpec, row: dict, option: str,
+                  fallbacks: tuple[str, ...]) -> float | None:
+    """The row's value for an optional numeric column, or `None` when there
+    isn't one.
+
+    `None` means *the data does not carry this*, and callers turn that into
+    an omitted attribute or the unknown sentinel — never into a zero. A value
+    that is present but unusable (unparseable, NaN, infinite) is also `None`:
+    we know we do not have it, which is exactly what absence means.
+    """
+    key = _first_key(row, _opt(spec, option, None), fallbacks)
+    if key is None or row.get(key) is None:
+        return None
+    try:
+        f = float(row[key])
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _sentinel(value: float | None, places: int) -> str:
+    return f"{UNKNOWN_VALUE_SENTINEL:.1f}" if value is None else f"{value:.{places}f}"
+
+
+def _detail_element(spec: DatasetSpec, row: dict, ev: ET.Element, callsign: str) -> None:
+    """Build `<detail>`, in the child order TAK itself writes.
+
+    Every child is conditional: a `<track>` with no speed and no course, or a
+    `<status>` with no battery, would assert the reporter said something it
+    did not. Only `<contact>` is unconditional, because the callsign is
+    derived from the uid when no column supplies one.
+    """
+    opts = spec.output.options
+    detail = ET.SubElement(ev, "detail")
+
+    speed = _optional_num(spec, row, "speed_column", _SPEED_FALLBACKS)
+    course = _optional_num(spec, row, "course_column", _COURSE_FALLBACKS)
+    if speed is not None or course is not None:
+        track: dict[str, str] = {}
+        if speed is not None:
+            track["speed"] = f"{speed:.2f}"
+        if course is not None:
+            # Degrees true, [0, 360). A generator asked for 0..360 inclusive
+            # would otherwise emit an out-of-range 360.0 on its top bin.
+            track["course"] = f"{course % 360.0:.1f}"
+        ET.SubElement(detail, "track", track)
+
+    geopointsrc, altsrc = opts.get("geopointsrc"), opts.get("altsrc")
+    if geopointsrc or altsrc:
+        precision: dict[str, str] = {}
+        if geopointsrc:
+            precision["geopointsrc"] = str(geopointsrc)
+        if altsrc:
+            precision["altsrc"] = str(altsrc)
+        ET.SubElement(detail, "precisionlocation", precision)
+
+    # Defaults to "chaff", so every event this encoder produces says in its own
+    # provenance field that a synthetic generator made it. Opt-out (set it to
+    # something else, or "" to drop the element) rather than opt-in: a consumer
+    # that has to be told out-of-band which feed is synthetic will eventually
+    # not be told. Deliberately NOT the running chaff version — that would make
+    # the bytes vary by install and break INV-3 across releases.
+    platform, version = opts.get("takv_platform", "chaff"), opts.get("takv_version")
+    if platform or version:
+        takv: dict[str, str] = {}
+        if platform:
+            takv["platform"] = str(platform)
+        if version:
+            takv["version"] = str(version)
+        ET.SubElement(detail, "takv", takv)
+
+    battery = _optional_num(spec, row, "battery_column", _BATTERY_FALLBACKS)
+    if battery is not None:
+        ET.SubElement(detail, "status", {"battery": f"{int(battery)}"})
+
+    ET.SubElement(detail, "contact", {"callsign": callsign})
 
 
 def _event_element(spec: DatasetSpec, row: dict) -> ET.Element:
@@ -91,16 +198,14 @@ def _event_element(spec: DatasetSpec, row: dict) -> ET.Element:
         "start": _cot_time(t),
         "stale": _cot_time(stale),
     })
-    hae = _num(row.get(opts.get("hae_column", "hae")), 0.0)
     ET.SubElement(ev, "point", {
         "lat": f"{_num(row.get(opts.get('lat_column', 'lat'))):.6f}",
         "lon": f"{_num(row.get(opts.get('lon_column', 'lon'))):.6f}",
-        "hae": f"{hae:.1f}",
-        "ce": "9999999.0",
-        "le": "9999999.0",
+        "hae": _sentinel(_optional_num(spec, row, "hae_column", ("hae",)), 1),
+        "ce": _sentinel(_optional_num(spec, row, "ce_column", ("ce",)), 1),
+        "le": _sentinel(_optional_num(spec, row, "le_column", ("le",)), 1),
     })
-    detail = ET.SubElement(ev, "detail")
-    ET.SubElement(detail, "contact", {"callsign": callsign})
+    _detail_element(spec, row, ev, callsign)
     return ev
 
 
