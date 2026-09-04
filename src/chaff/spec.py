@@ -180,6 +180,16 @@ class ObserverSpec(BaseModel):
                     "Position has its own channel in `position_error_m`; this is for everything "
                     "else a sensor can be confidently wrong about.",
     )
+    clock_error_s: float = Field(
+        0.0,
+        description="Seconds this observer's clock is wrong by, BEYOND any offset it declares. "
+                    "A `base_time` override in `options` is a declared offset — legitimate scene "
+                    "design, and recorded in the answer key so a consumer can be held to it. This "
+                    "is the undeclared remainder: a clock nobody knows is wrong. Deliberately a "
+                    "FAULT, like `misreports` and `frame_center_error_m`. It shifts every "
+                    "timestamp equally, so ordering and intervals both survive it and only a "
+                    "comparison against the truth can see it.",
+    )
     format: Optional[str] = Field(
         None,
         description="Encode this observer's feed as this format instead of `output.format`. "

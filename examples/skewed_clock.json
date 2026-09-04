@@ -1,0 +1,279 @@
+{
+  "name": "skewed_clock",
+  "description": "PRESET: a correlated scene set in Los Angeles where one feed reports LOCAL time as if it were UTC \u2014 seven hours behind, declared nowhere. Every position is right, every pairing is findable, every packet decodes, the feed is perfectly ordered and its intervals are exact to the millisecond. A wrong clock shifts every timestamp equally, so nothing about the sequence betrays it. Only a comparison against the truth can.",
+  "seed": 8675309,
+  "columns": [
+    {
+      "name": "lat",
+      "generator": "lat",
+      "params": {
+        "min": 34.04,
+        "max": 34.1
+      }
+    },
+    {
+      "name": "lon",
+      "generator": "lon",
+      "params": {
+        "min": -118.3,
+        "max": -118.22
+      }
+    },
+    {
+      "name": "hae",
+      "generator": "float_uniform",
+      "params": {
+        "min": 55.0,
+        "max": 165.0
+      }
+    },
+    {
+      "name": "speed",
+      "generator": "float_uniform",
+      "params": {
+        "min": 0.3,
+        "max": 4.4
+      }
+    },
+    {
+      "name": "heading",
+      "generator": "int_range",
+      "params": {
+        "min": 0,
+        "max": 359
+      }
+    },
+    {
+      "name": "battery",
+      "generator": "int_range",
+      "params": {
+        "min": 30,
+        "max": 100
+      }
+    },
+    {
+      "name": "priority",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 24
+      }
+    },
+    {
+      "name": "confidence",
+      "generator": "int_range",
+      "params": {
+        "min": 55,
+        "max": 99
+      }
+    },
+    {
+      "name": "history",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 60
+      }
+    },
+    {
+      "name": "percent_pixels",
+      "generator": "int_range",
+      "params": {
+        "min": 3,
+        "max": 85
+      }
+    },
+    {
+      "name": "intensity",
+      "generator": "int_range",
+      "params": {
+        "min": 90,
+        "max": 4090
+      }
+    },
+    {
+      "name": "pixel_row",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 1080
+      }
+    },
+    {
+      "name": "pixel_col",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 1920
+      }
+    },
+    {
+      "name": "track_confidence",
+      "generator": "int_range",
+      "params": {
+        "min": 50,
+        "max": 97
+      }
+    },
+    {
+      "name": "detection_status",
+      "generator": "choice_weighted",
+      "params": {
+        "values": [
+          "active_moving",
+          "active_stopped"
+        ],
+        "weights": [
+          0.75,
+          0.25
+        ]
+      }
+    },
+    {
+      "name": "conf_vehicle",
+      "generator": "float_uniform",
+      "params": {
+        "min": 55.0,
+        "max": 96.0
+      }
+    },
+    {
+      "name": "conf_car",
+      "generator": "float_uniform",
+      "params": {
+        "min": 35.0,
+        "max": 82.0
+      },
+      "null_rate": 0.35
+    },
+    {
+      "name": "conf_motorcycle",
+      "generator": "float_uniform",
+      "params": {
+        "min": 12.0,
+        "max": 55.0
+      },
+      "null_rate": 0.45
+    },
+    {
+      "name": "conf_person",
+      "generator": "float_uniform",
+      "params": {
+        "min": 10.0,
+        "max": 60.0
+      },
+      "null_rate": 0.5
+    },
+    {
+      "name": "conf_watercraft",
+      "generator": "float_uniform",
+      "params": {
+        "min": 5.0,
+        "max": 35.0
+      },
+      "null_rate": 0.6
+    },
+    {
+      "name": "conf_aircraft",
+      "generator": "float_uniform",
+      "params": {
+        "min": 5.0,
+        "max": 30.0
+      },
+      "null_rate": 0.6
+    }
+  ],
+  "output": {
+    "format": "cot",
+    "options": {
+      "tick_column": "t",
+      "base_time": "2026-01-01T00:00:00Z",
+      "interval_seconds": 5,
+      "stale_seconds": 60,
+      "type": "a-f-G-U-C",
+      "geopointsrc": "GPS",
+      "altsrc": "GPS",
+      "system_name": "chaff",
+      "source_sensor": "synthetic-eo",
+      "frame_width": 1920,
+      "frame_height": 1080,
+      "horizontal_fov": 24.0,
+      "vertical_fov": 13.5,
+      "classes": [
+        {
+          "iri": "https://example.invalid/ontology#Vehicle",
+          "confidence_column": "conf_vehicle"
+        },
+        {
+          "iri": "https://example.invalid/ontology#Car",
+          "confidence_column": "conf_car"
+        },
+        {
+          "iri": "https://example.invalid/ontology#Motorcycle",
+          "confidence_column": "conf_motorcycle"
+        },
+        {
+          "iri": "https://example.invalid/ontology#Person",
+          "confidence_column": "conf_person"
+        },
+        {
+          "iri": "https://example.invalid/ontology#Watercraft",
+          "confidence_column": "conf_watercraft"
+        },
+        {
+          "iri": "https://example.invalid/ontology#Aircraft",
+          "confidence_column": "conf_aircraft"
+        }
+      ]
+    }
+  },
+  "sink": {
+    "sink": "file",
+    "options": {
+      "path": "out/skewed_clock.out"
+    }
+  },
+  "entity": {
+    "count": 6,
+    "ticks": 40,
+    "id_column": "uid",
+    "id_pattern": "TRUTH-#####",
+    "tick_column": "t",
+    "updates": [
+      {
+        "updater": "movement",
+        "params": {
+          "speed": 0.0002,
+          "turn_stddev": 8
+        }
+      }
+    ],
+    "observers": [
+      {
+        "name": "cot-01",
+        "id_pattern": "ANDROID-#######",
+        "position_error_m": 6.0,
+        "reports": {
+          "ce": 6.0,
+          "le": 9.0
+        },
+        "options": {
+          "takv_version": "5.1.0"
+        },
+        "//clock_error_s": "-25200 is seven hours: the scene is at 34.07N, -118.26E, which is Los Angeles, and this sensor is putting PDT on the wire under a UTC label. Declared NOWHERE \u2014 an observer's `base_time` override is a declared offset the answer key records, and this is the undeclared remainder. Course, speed and position are untouched: one clock wrong and everything else right.",
+        "clock_error_s": -25200.0
+      },
+      {
+        "name": "vmti-01",
+        "format": "klv",
+        "id_pattern": "######",
+        "position_error_m": 12.0,
+        "reports": {
+          "sigma_east": 12.0,
+          "sigma_north": 12.0,
+          "sigma_up": 18.0
+        }
+      }
+    ]
+  }
+}
