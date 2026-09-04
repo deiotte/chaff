@@ -478,6 +478,15 @@ def iter_observed_rows(spec: DatasetSpec, observer: ObserverSpec) -> Iterator[di
         # account of its own accuracy is not the scene's to state.
         row.update(observer.reports)
 
+        # A unit or scale fault, applied last so it lands on whatever the row
+        # ended up carrying. Non-numeric and absent values pass untouched: a
+        # scale factor is a claim about a measurement, and a column that holds
+        # no measurement has nothing to be wrong about.
+        for column, factor in observer.misreports.items():
+            value = row.get(column)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                row[column] = float(value) * float(factor)
+
         if observer.position_error_m > 0:
             lat, lon = row.get(observer.lat_column), row.get(observer.lon_column)
             if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
@@ -579,7 +588,37 @@ def scene_truth(spec: DatasetSpec) -> dict[str, Any]:
                        "position into a distance from the truth — which is the only way to see "
                        "a fault that leaves every packet well-formed and every value in range.",
         "positions": _truth_positions(spec),
+        "//kinematics": "What each entity was really doing, [speed_m_s, course_deg] per tick in "
+                        "tick order. Unlike position an observer does not perturb these, so any "
+                        "difference a consumer shows is its own — an encoding quantum at best and "
+                        "a unit or convention error at worst. A wrong scale here is the archetypal "
+                        "invisible fault: every value stays finite, in range and plausible.",
+        "kinematics": _truth_kinematics(spec),
     }
+
+
+def _truth_kinematics(spec: DatasetSpec) -> dict[str, list[list[float | None]]]:
+    """Every entity's real speed and course, per tick.
+
+    Beside `positions` and read the same way. The pairing matters: a feed can
+    put a thing in exactly the right place and still say it is travelling the
+    wrong way at twice the speed, and nothing about the position says so.
+
+    A column a scene does not carry yields `null` for that slot rather than a
+    zero — an absent measurement and a measured zero are different claims, and
+    a consumer scored against a fabricated zero would be marked wrong for
+    being right.
+    """
+    ent = spec.entity
+    tracks: dict[str, list[list[float | None]]] = {}
+    for row in iter_entity_rows(spec):
+        pair = [_maybe_float(row.get("speed")), _maybe_float(row.get("heading"))]
+        tracks.setdefault(str(row[ent.id_column]), []).append(pair)
+    return tracks
+
+
+def _maybe_float(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 def _truth_positions(spec: DatasetSpec) -> dict[str, list[list[float]]]:

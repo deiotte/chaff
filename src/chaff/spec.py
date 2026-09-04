@@ -170,6 +170,16 @@ class ObserverSpec(BaseModel):
                     "different error radii then disagree honestly instead of both claiming "
                     "the same accuracy.",
     )
+    misreports: dict[str, float] = Field(
+        default_factory=dict,
+        description="Numeric columns this observer scales by a factor before reporting them — "
+                    "`{\"speed\": 1.9438}` is a sensor measuring metres per second and putting "
+                    "knots on the wire while still calling them metres per second. Deliberately a "
+                    "FAULT and named as one: every value stays finite, in range and plausible, so "
+                    "nothing downstream refuses it and no amount of reading the feed reveals it. "
+                    "Position has its own channel in `position_error_m`; this is for everything "
+                    "else a sensor can be confidently wrong about.",
+    )
     format: Optional[str] = Field(
         None,
         description="Encode this observer's feed as this format instead of `output.format`. "

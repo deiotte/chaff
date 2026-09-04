@@ -216,6 +216,76 @@ def test_every_observers_reports_land_inside_the_declared_error():
         assert all(metres(t, o) <= declared[name] + 1e-6 for t, o in zip(truth, rows))
 
 
+def test_truth_carries_what_everything_was_really_doing():
+    spec = scene([{"name": "a", "id_pattern": "A-####"}])
+    truth = scene_truth(spec)
+    assert set(truth["kinematics"]) == set(truth["positions"])
+    assert {len(t) for t in truth["kinematics"].values()} == {spec.entity.ticks}
+
+
+def test_an_absent_measurement_is_null_and_not_a_zero():
+    """A consumer scored against a fabricated zero would be marked wrong for being right."""
+    spec = load_spec({
+        "name": "s", "seed": 3,
+        "columns": [{"name": "lat", "generator": "lat"}, {"name": "lon", "generator": "lon"}],
+        "output": {"format": "json", "options": {}},
+        "entity": {"count": 1, "ticks": 2, "observers": [{"name": "a", "id_pattern": "A-##"}]},
+    })
+    assert all(pair == [None, None]
+               for track in scene_truth(spec)["kinematics"].values() for pair in track)
+
+
+def kinematic_scene(observers):
+    """A scene carrying a speed as well as a heading, which `scene()` does not."""
+    return load_spec({
+        "name": "kin", "seed": 11,
+        "columns": [
+            {"name": "lat", "generator": "lat", "params": {"min": 34.0, "max": 34.05}},
+            {"name": "lon", "generator": "lon", "params": {"min": -118.3, "max": -118.25}},
+            {"name": "heading", "generator": "int_range", "params": {"min": 0, "max": 359}},
+            {"name": "speed", "generator": "float_uniform", "params": {"min": 1.0, "max": 6.0}},
+        ],
+        "output": {"format": "ndjson"},
+        "entity": {"count": 4, "ticks": 6, "id_column": "uid", "tick_column": "t",
+                   "id_pattern": "TRUTH-####",
+                   "updates": [{"updater": "movement", "params": {"speed": 0.0002}}],
+                   "observers": observers},
+    })
+
+
+def test_misreports_scales_a_column_and_leaves_its_neighbours_alone():
+    """**The archetypal invisible fault.** A sensor measuring metres per second and writing knots
+    produces values that are finite, in range, and plausible — nothing refuses them."""
+    spec = kinematic_scene([{"name": "honest"},
+                            {"name": "knots", "misreports": {"speed": 1.9438}}])
+    truth = generate_entity_rows(spec)
+    feeds = {n: r for n, _, r in observer_views(spec)}
+
+    assert [r["speed"] for r in feeds["honest"]] == [r["speed"] for r in truth]
+    assert [r["speed"] for r in feeds["knots"]] == pytest.approx(
+        [r["speed"] * 1.9438 for r in truth])
+    # The neighbouring column is untouched — one number wrong, the rest right.
+    assert [r["heading"] for r in feeds["knots"]] == [r["heading"] for r in truth]
+
+
+def test_misreports_leaves_a_column_it_cannot_scale_alone():
+    """A scale factor is a claim about a measurement; a column holding no measurement has nothing
+    to be wrong about, and coercing one would be inventing a value."""
+    spec = scene([{"name": "a", "misreports": {"absent": 2.0, "heading": 2.0}}])
+    rows = next(r for n, _, r in observer_views(spec))
+    assert "absent" not in rows[0]
+    assert all(isinstance(r["heading"], float) for r in rows)
+
+
+def test_misreporting_does_not_disturb_position():
+    """Position has its own fault channel. A value fault that also moved things would be caught by
+    a positional gate, and would prove nothing about attribute scoring."""
+    spec = kinematic_scene([{"name": "a", "position_error_m": 0.0, "misreports": {"speed": 3.0}}])
+    truth = generate_entity_rows(spec)
+    rows = next(r for n, _, r in observer_views(spec))
+    assert [(r["lat"], r["lon"]) for r in rows] == [(r["lat"], r["lon"]) for r in truth]
+
+
 def test_truth_is_never_a_feed():
     """It ships beside the feeds as its own member, and no feed contains it."""
     members = encode_observers(scene([{"name": "a", "id_pattern": "A-####"}]))
