@@ -437,10 +437,21 @@ found it reached 6 of the 12 fields that reader maps, and fabricated one.
       `examples/correlated_multikind.json` renders one scene as CoT XML and as
       VMTI KLV at once, with its own truth file.
 
+- [x] **Multi-target frames and the culling ratio (ADR-0035).** ST 0903.6
+      carries two counts per frame — targets detected and targets reported —
+      and the gap between them is what the sensor chose not to say. With one
+      target per packet that ratio is 1:1 forever, so a consumer's culling
+      assessment could never be exercised by generated data at all.
+      `frame_column` groups consecutive rows into one packet;
+      `total_detected_column` lets a frame declare what it withheld. A framed
+      spec refuses to stream rather than silently emitting one-target packets
+      that would restore the very ratio it was written to avoid. Example:
+      `examples/vmti_frames.json` — 40 frames of 6, report ratio moving
+      0.188..1.000, a consumer's culling flag raised on 38 of 40.
+
 ### Deferred
-- Embedded VMTI (an ST 0601 parent frame carrying a VMTI set as one item) and
-  multi-target frames. Both are real; neither is expressible on the per-record
-  streaming seam without a batching model, which is its own decision.
+- Embedded VMTI: an ST 0601 parent frame carrying a VMTI set as Item 74. The
+  last shape of this format chaff cannot produce.
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
