@@ -40,10 +40,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from . import encoder, record_encoder
+from ._timing import event_time as _event_time, optional_num as _shared_optional_num
 from ..spec import DatasetSpec
 
 _UID_FALLBACKS = ("track_id", "entity_id", "uid", "id")
-_TICK_FALLBACKS = ("tick", "t")
 _SPEED_FALLBACKS = ("speed",)
 _COURSE_FALLBACKS = ("course", "heading")
 _BATTERY_FALLBACKS = ("battery",)
@@ -60,12 +60,6 @@ def _opt(spec: DatasetSpec, key: str, default: Any) -> Any:
     return spec.output.options.get(key, default)
 
 
-def _parse_time(value: str) -> datetime:
-    s = str(value).strip().replace("Z", "+00:00")
-    dt = datetime.fromisoformat(s)
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
 def _cot_time(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
@@ -74,17 +68,6 @@ def _first_key(row: dict, explicit: str | None, fallbacks: tuple[str, ...]) -> s
     if explicit:
         return explicit
     return next((k for k in fallbacks if k in row), None)
-
-
-def _event_time(spec: DatasetSpec, row: dict) -> datetime:
-    time_col = _opt(spec, "time_column", None)
-    if time_col and row.get(time_col) is not None:
-        return _parse_time(row[time_col])
-    base = _parse_time(_opt(spec, "base_time", "2025-01-01T00:00:00Z"))
-    tick_col = _first_key(row, _opt(spec, "tick_column", None), _TICK_FALLBACKS)
-    if tick_col is not None and isinstance(row.get(tick_col), (int, float)):
-        return base + timedelta(seconds=float(_opt(spec, "interval_seconds", 1.0)) * row[tick_col])
-    return base
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -103,22 +86,9 @@ def _num(value: Any, default: float = 0.0) -> float:
 
 def _optional_num(spec: DatasetSpec, row: dict, option: str,
                   fallbacks: tuple[str, ...]) -> float | None:
-    """The row's value for an optional numeric column, or `None` when there
-    isn't one.
-
-    `None` means *the data does not carry this*, and callers turn that into
-    an omitted attribute or the unknown sentinel — never into a zero. A value
-    that is present but unusable (unparseable, NaN, infinite) is also `None`:
-    we know we do not have it, which is exactly what absence means.
-    """
-    key = _first_key(row, _opt(spec, option, None), fallbacks)
-    if key is None or row.get(key) is None:
-        return None
-    try:
-        f = float(row[key])
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
+    """See `_timing.optional_num` — shared so every sensor encoder treats an
+    absent, unparseable or non-finite value the same way."""
+    return _shared_optional_num(spec, row, option, fallbacks)
 
 
 def _sentinel(value: float | None, places: int) -> str:

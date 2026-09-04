@@ -420,11 +420,27 @@ found it reached 6 of the 12 fields that reader maps, and fabricated one.
       never perturbs the scene behind it (derived rng, pinned by test), and a
       colliding id pattern is refused rather than silently merging two
       entities into one. Example: `examples/correlated_scene.json`.
-- [ ] **MISB ST 0903.6 (VMTI) encoder.** The other format this class of
-      consumer speaks, and a much bigger job than CoT: BER-TLV framing, an
-      item table, ST 1201 IMAPA/IMAPB numeric packing. Own round, own ADR.
-      Note the trap before starting: a second implementation of a standard is
-      only safe if something checks it against a real decoder.
+- [x] **MISB ST 0903.6 (VMTI) encoder (ADR-0034).** Binary KLV: BER-TLV
+      framing, the universal label, the ST 0903.6-119 checksum, VTarget packs
+      with nested VTracker and VObject sets, an Ontology series, and ST 1201
+      IMAPB numeric packing. Stdlib only. The trap noted here before starting
+      is the whole story: a mis-scaled IMAPB value is a well-formed number of
+      the right width in the right place meaning something else, so the port is
+      pinned locally against reference vectors from the other implementation
+      and remotely by a conformance gate. All 21 attributes a real consumer
+      declares are reachable — verified by decoding the preset's 240 packets
+      through it: 0 refusals, 0 anomalies, 21/21 attributes, 11 confidence
+      entries. Example: `examples/vmti_targets.json`.
+- [x] **An observer may choose its own format (ADR-0034 §5).** Two sensors
+      watching one scene need not speak the same language, and a consumer that
+      fuses across a *format* boundary is the one worth rehearsing against.
+      `examples/correlated_multikind.json` renders one scene as CoT XML and as
+      VMTI KLV at once, with its own truth file.
+
+### Deferred
+- Embedded VMTI (an ST 0601 parent frame carrying a VMTI set as one item) and
+  multi-target frames. Both are real; neither is expressible on the per-record
+  streaming seam without a batching model, which is its own decision.
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
