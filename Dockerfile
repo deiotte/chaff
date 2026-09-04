@@ -6,7 +6,7 @@
 # A pin only stays safe if something bumps it — otherwise it freezes an
 # unpatched base in place, which is worse than the mutable tag it replaced.
 # .github/dependabot.yml is that something; do not pin anything here without it.
-FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
+FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
 WORKDIR /app
 
 # Which optional extras to bake in. Default = API + streaming sinks (so the
