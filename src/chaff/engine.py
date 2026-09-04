@@ -12,6 +12,8 @@ before — byte-for-byte identical (INV-3).
 
 from __future__ import annotations
 
+import itertools
+import json
 import math
 import os
 import random
@@ -30,7 +32,7 @@ from .sinks import (
     time_limited,
 )
 from .secrets import resolve_env
-from .spec import ColumnSpec, DatasetSpec
+from .spec import ColumnSpec, DatasetSpec, ObserverSpec
 from .updaters import EntityContext, get_updater
 
 
@@ -264,7 +266,10 @@ def effective_row_count(spec: DatasetSpec) -> int:
     should account for all of it, not just the primary table.
     """
     if spec.entity:
-        return spec.entity.count * spec.entity.ticks
+        # Every observer renders the whole scene, so a two-observer spec is
+        # twice the rows. A ceiling that counted the scene once would admit a
+        # request that produces double what it measured.
+        return spec.entity.count * spec.entity.ticks * max(len(spec.entity.observers), 1)
     if spec.tables:
         return spec.rows + sum(t.rows for t in spec.tables)
     return spec.rows
@@ -334,6 +339,9 @@ def run(spec: DatasetSpec) -> str:
     if spec.tables:
         return _run_multi(spec)
 
+    if spec.entity and spec.entity.observers:
+        return _run_observers(spec)
+
     sink_id = spec.sink.sink
 
     if is_stream_sink(sink_id):
@@ -391,6 +399,178 @@ def encode_view(spec: DatasetSpec) -> DatasetSpec:
     return spec.model_copy(update={"columns": synthesized + list(spec.columns)})
 
 
+# ── Observers: one scene, several accounts of it (ADR-0033) ──────────
+
+#: Metres per degree of latitude. A sphere, deliberately: the perturbation this
+#: backs is a synthetic measurement error of a few metres, and an ellipsoidal
+#: model would add precision to a number that was invented.
+_M_PER_DEG = 111_320.0
+
+
+def _observer_rng(spec: DatasetSpec, observer: ObserverSpec) -> random.Random:
+    """A generator private to one observer.
+
+    Derived from the seed and the observer's name rather than drawn from the
+    scene's own rng, so that **adding an observer never changes the scene**.
+    Sharing the scene rng would make every entity's trajectory depend on how
+    many sensors were watching it, which is both wrong and the kind of wrong
+    that only shows up when someone compares two runs (INV-3).
+    """
+    return random.Random(f"{spec.seed}:observer:{observer.name}")
+
+
+def _observer_faker(spec: DatasetSpec, observer: ObserverSpec) -> Faker:
+    """The observer's faker, derived like its rng so the scene stays untouched."""
+    faker = Faker()
+    faker.seed_instance(f"{spec.seed}:observer:{observer.name}")
+    return faker
+
+
+def _misplace(rng: random.Random, lat: float, lon: float, radius_m: float) -> tuple[float, float]:
+    """Move a position somewhere inside `radius_m` of where it really was.
+
+    Uniform over the disc — `sqrt` on the radius, or the draws crowd the
+    centre — and **bounded rather than Gaussian on purpose**. A normal
+    distribution has a tail, so a fixture built on one asserts something that
+    is merely usually true; a consumer's gate radius could be cleared on nine
+    runs in ten. Bounded error makes the worst case arithmetic: two observers
+    can disagree by at most the sum of their radii, and a test can say so.
+    """
+    r = radius_m * math.sqrt(rng.random())
+    theta = rng.random() * 2.0 * math.pi
+    dlat = (r * math.cos(theta)) / _M_PER_DEG
+    # Longitude degrees shrink toward the poles. Clamped because at the pole
+    # itself the scale is zero and the offset would be infinite.
+    scale = _M_PER_DEG * max(math.cos(math.radians(lat)), 1e-6)
+    dlon = (r * math.sin(theta)) / scale
+    return lat + dlat, lon + dlon
+
+
+def iter_observed_rows(spec: DatasetSpec, observer: ObserverSpec) -> Iterator[dict[str, Any]]:
+    """One observer's account of the scene: every snapshot, seen imperfectly.
+
+    The entity id is replaced with this observer's own — a sensor names what
+    it sees in its own namespace, and two sensors naming one object
+    identically is the thing a correlating consumer is supposed to *work out*,
+    not be handed. Position is displaced within `position_error_m`. Everything
+    else passes through: an observer reports the scene, it does not invent one.
+    """
+    ent = spec.entity
+    rng = _observer_rng(spec, observer)
+    faker = _observer_faker(spec, observer)
+    aliases: dict[Any, Any] = {}
+    pattern_fn = get_generator("pattern")
+
+    for truth in iter_entity_rows(spec):
+        row = dict(truth)
+        real_id = truth[ent.id_column]
+        if observer.id_pattern:
+            if real_id not in aliases:
+                # Entities first appear in a fixed order (tick 0, in index
+                # order), so the alias each one is given is deterministic.
+                ctx = GenContext(rng=rng, faker=faker, row_index=len(aliases), row={}, cache={})
+                aliases[real_id] = pattern_fn(ctx, {"pattern": observer.id_pattern})
+            row[ent.id_column] = aliases[real_id]
+
+        # What the sensor says about itself. Applied before the scene's own
+        # values would be read, but after the copy, so a `reports` key that
+        # collides with a scene column deliberately wins: the observer's
+        # account of its own accuracy is not the scene's to state.
+        row.update(observer.reports)
+
+        if observer.position_error_m > 0:
+            lat, lon = row.get(observer.lat_column), row.get(observer.lon_column)
+            if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                row[observer.lat_column], row[observer.lon_column] = _misplace(
+                    rng, float(lat), float(lon), observer.position_error_m)
+        yield row
+
+
+def observer_views(spec: DatasetSpec) -> Iterator[tuple[str, DatasetSpec, list[dict[str, Any]]]]:
+    """Yield `(observer_name, view, rows)` for a scene with observers.
+
+    Each view is an ordinary entity spec with `observers` cleared and this
+    observer's `options` overlaid on the output, so every encoder and sink
+    downstream sees what it would see for a plain spec — no encoder knows
+    observers exist (INV-2). A per-observer clock offset is expressed here, as
+    a `base_time` in those options, because when the event happened *according
+    to this sensor* is a fact about the encoding rather than about the scene.
+    """
+    declared = {c.name for c in spec.columns}
+    for observer in spec.entity.observers:
+        # A `reports` key is a real column in this observer's rows but is
+        # declared nowhere in the spec, so a column-oriented encoder would
+        # drop it exactly as one dropped the entity id and tick before
+        # ADR-0028. Declare them on the view instead of relying on every
+        # encoder being row-oriented.
+        extra = [ColumnSpec(name=k, generator=_ENGINE_SUPPLIED)
+                 for k in observer.reports if k not in declared]
+        view = spec.model_copy(update={
+            "entity": spec.entity.model_copy(update={"observers": []}),
+            "columns": list(spec.columns) + extra,
+            "output": spec.output.model_copy(update={
+                "options": {**spec.output.options, **observer.options},
+            }),
+        })
+        yield observer.name, view, list(iter_observed_rows(spec, observer))
+
+
+def _distinct(ids: list[Any], source: str) -> list[Any]:
+    """Refuse an id scheme that gave two entities the same name.
+
+    A pattern with too few placeholders collides — `TRUTH-##` runs out at a
+    hundred — and the collision is silent everywhere else: the feeds look
+    fine, and only the answer key quietly merges two things into one. Scoring
+    a consumer against that would mark a correct refusal wrong and a wrong
+    pairing right, which is worse than having no key at all.
+    """
+    seen = [i for i in ids if ids.count(i) > 1]
+    if seen:
+        raise ValueError(
+            f"{source} gave the same id to more than one entity ({sorted({str(i) for i in seen})}) — "
+            f"widen the pattern (more '#' or '?') so every entity is distinct")
+    return ids
+
+
+def scene_truth(spec: DatasetSpec) -> dict[str, Any]:
+    """Which observations are the same thing — the answer key.
+
+    chaff knows what every observer is looking at. Writing that down is what
+    lets a consumer be scored rather than merely watched: without it you can
+    see that a correlator paired two tracks, but not whether it paired the
+    *right* two, and a false pairing looks exactly like a true one.
+
+    **This is an evaluation artifact and never part of a feed.** No sensor
+    emits it, so anything that reads it is a test harness; a consumer given
+    this has been handed the answer to the question it exists to answer.
+    """
+    ent = spec.entity
+    identities: dict[str, dict[str, Any]] = {}
+    # Tick 0 emits every entity once, in index order, and an observer yields
+    # rows in that same order — so the first `count` rows of each are the whole
+    # identity mapping, and nothing needs the other ticks.
+    head = lambda rows: [r[ent.id_column] for r in itertools.islice(rows, ent.count)]  # noqa: E731
+    truth_ids = _distinct(head(iter_entity_rows(spec)), "the scene's own id_pattern")
+    for observer in ent.observers:
+        observed_ids = _distinct(
+            head(iter_observed_rows(spec, observer)),
+            f"observer '{observer.name}''s id_pattern")
+        for real, observed in zip(truth_ids, observed_ids):
+            identities.setdefault(str(real), {})[observer.name] = observed
+    return {
+        "//": "Ground truth for a chaff scene: which observer-side ids are the same "
+              "real entity. An evaluation artifact (chaff ADR-0033) — no sensor emits "
+              "this, and a consumer handed it has been given the answer to the question "
+              "it exists to answer.",
+        "scene": spec.name,
+        "seed": spec.seed,
+        "entities": ent.count,
+        "ticks": ent.ticks,
+        "observers": [o.name for o in ent.observers],
+        "identities": identities,
+    }
+
+
 def table_views(spec: DatasetSpec) -> Iterator[tuple[str, DatasetSpec, list[dict[str, Any]]]]:
     """Yield `(table_name, single-table view, rows)` for a multi-table spec.
 
@@ -442,6 +622,29 @@ def encode_tables(spec: DatasetSpec) -> list[tuple[str, str, bytes]]:
     ]
 
 
+def encode_observers(spec: DatasetSpec) -> list[tuple[str, str, bytes]]:
+    """Generate + encode every observer's feed, delivery-free.
+
+    Returns `[(observer_name, filename, payload)]`, ending with the scene's
+    ground truth. The caller decides where the bytes go — `run()` hands them
+    to a sink, the API zips them — so this stays a pure function of the spec
+    (INV-2) and both paths deliver the same bytes.
+
+    Truth rides along because a download that omitted it would leave the
+    browser user unable to do the one thing the observers are for: check
+    whether a consumer got the pairing right.
+    """
+    ext = get_extension(spec.output.format)
+    encoder = get_encoder(spec.output.format)
+    out = [
+        (name, _safe_member_name(f"{spec.name}-{name}{ext}", ""), encoder(encode_view(view), rows))
+        for name, view, rows in observer_views(spec)
+    ]
+    truth = json.dumps(scene_truth(spec), indent=2).encode("utf-8") + b"\n"
+    out.append(("truth", _safe_member_name(f"{spec.name}-truth.json", ""), truth))
+    return out
+
+
 def _run_multi(spec: DatasetSpec) -> str:
     """Generate related tables (FK integrity) and deliver one per table on
     the shared format/sink. Each table encodes as an ordinary single-table
@@ -475,6 +678,57 @@ def _run_multi(spec: DatasetSpec) -> str:
         })
         payload = encoder(view, rows)
         receipts.append(sink(view, payload))
+
+    return _egg(spec, "\n".join(receipts))
+
+
+def _run_observers(spec: DatasetSpec) -> str:
+    """Deliver one file per observer, plus the scene's truth alongside.
+
+    Mirrors `_run_multi`: each observer encodes as an ordinary single-feed
+    view, so encoders and sinks stay unchanged (INV-2).
+    """
+    if is_stream_sink(spec.sink.sink):
+        raise ValueError(
+            "observer specs produce one whole file per observer; streaming "
+            "sinks (http/kafka/tcp/udp) deliver a single feed. Stream one "
+            "observer at a time by removing the others from the spec."
+        )
+
+    ext = get_extension(spec.output.format)
+    encoder = get_encoder(spec.output.format)
+    sink = get_sink(spec.sink.sink)
+
+    base = spec.sink.options.get("path")
+    base_dir = Path(base).parent if base else Path(".")
+    stem = Path(base).stem if base else spec.name
+    base_resolved = base_dir.resolve()
+
+    def target_for(member: str) -> Path:
+        path = base_dir / _safe_member_name(member, "")
+        # Same containment check the table path makes, for the same reason:
+        # a name that slipped past validation must not write outside the
+        # directory the user asked for.
+        if base_resolved not in path.resolve().parents:
+            raise ValueError(f"'{member}' would write outside {base_dir} — refusing")
+        return path
+
+    receipts = []
+    for name, view, rows in observer_views(spec):
+        target = target_for(f"{stem}-{name}{ext}")
+        view = view.model_copy(update={
+            "sink": spec.sink.model_copy(update={
+                "options": {**spec.sink.options, "path": str(target)}
+            }),
+        })
+        receipts.append(sink(view, encoder(encode_view(view), rows)))
+
+    # The answer key. Written beside the feeds and never inside one: a
+    # consumer handed this has been given the answer to the question it
+    # exists to answer (ADR-0033).
+    truth_path = target_for(f"{stem}-truth.json")
+    truth_path.write_text(json.dumps(scene_truth(spec), indent=2) + "\n", encoding="utf-8")
+    receipts.append(f"wrote ground truth -> {truth_path} (evaluation artifact, not a feed)")
 
     return _egg(spec, "\n".join(receipts))
 

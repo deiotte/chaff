@@ -409,6 +409,17 @@ found it reached 6 of the 12 fields that reader maps, and fabricated one.
       no longer reach the wire. All 12 mapped fields now reachable; verified by
       decoding the preset's 480 events with a real reader — 0 refusals, 0
       anomalies.
+- [x] **Observers: one scene, several accounts of it (ADR-0033).** An entity
+      spec modelled a scene and then emitted it *as if* it were a feed, which
+      works right up until a consumer has two inputs. `EntitySpec.observers`
+      renders the same scene once per sensor — own ids, own bounded position
+      error, own self-reported accuracy, own format-option overlay — one file
+      each, and a `-truth.json` answer key naming which ids are the same
+      entity. Different ids are the point: that two tracks are one thing is
+      what a correlating consumer is supposed to work out. Adding an observer
+      never perturbs the scene behind it (derived rng, pinned by test), and a
+      colliding id pattern is refused rather than silently merging two
+      entities into one. Example: `examples/correlated_scene.json`.
 - [ ] **MISB ST 0903.6 (VMTI) encoder.** The other format this class of
       consumer speaks, and a much bigger job than CoT: BER-TLV framing, an
       item table, ST 1201 IMAPA/IMAPB numeric packing. Own round, own ADR.
