@@ -170,6 +170,15 @@ class ObserverSpec(BaseModel):
                     "different error radii then disagree honestly instead of both claiming "
                     "the same accuracy.",
     )
+    format: Optional[str] = Field(
+        None,
+        description="Encode this observer's feed as this format instead of `output.format`. "
+                    "Two sensors watching one scene need not speak the same language, and a "
+                    "consumer that fuses across them is exactly the one worth rehearsing "
+                    "against — so a scene can render one observer as CoT and another as VMTI. "
+                    "Format and sink stay independent axes (INV-2); the observer only picks "
+                    "which encoder its own rendering goes through.",
+    )
     options: dict[str, Any] = Field(
         default_factory=dict,
         description="Format options overlaid on `output.options` for this observer's file only. "

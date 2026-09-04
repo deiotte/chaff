@@ -509,6 +509,7 @@ def observer_views(spec: DatasetSpec) -> Iterator[tuple[str, DatasetSpec, list[d
             "entity": spec.entity.model_copy(update={"observers": []}),
             "columns": list(spec.columns) + extra,
             "output": spec.output.model_copy(update={
+                "format": observer.format or spec.output.format,
                 "options": {**spec.output.options, **observer.options},
             }),
         })
@@ -695,8 +696,6 @@ def _run_observers(spec: DatasetSpec) -> str:
             "observer at a time by removing the others from the spec."
         )
 
-    ext = get_extension(spec.output.format)
-    encoder = get_encoder(spec.output.format)
     sink = get_sink(spec.sink.sink)
 
     base = spec.sink.options.get("path")
@@ -715,13 +714,15 @@ def _run_observers(spec: DatasetSpec) -> str:
 
     receipts = []
     for name, view, rows in observer_views(spec):
-        target = target_for(f"{stem}-{name}{ext}")
+        # Each observer's own extension: a scene may render one feed as CoT
+        # and another as VMTI, and the file names have to say which is which.
+        target = target_for(f"{stem}-{name}{get_extension(view.output.format)}")
         view = view.model_copy(update={
             "sink": spec.sink.model_copy(update={
                 "options": {**spec.sink.options, "path": str(target)}
             }),
         })
-        receipts.append(sink(view, encoder(encode_view(view), rows)))
+        receipts.append(sink(view, get_encoder(view.output.format)(encode_view(view), rows)))
 
     # The answer key. Written beside the feeds and never inside one: a
     # consumer handed this has been given the answer to the question it
