@@ -42,6 +42,8 @@ options:
              IRIs are the CONSUMER's vocabulary and belong in the spec, never
              in this file: a generator that shipped a program's ontology would
              be carrying that program's domain knowledge (chaff ADR-0034).
+  frames     frame_column (group consecutive rows sharing it into one packet),
+             total_detected_column (targets the sensor found, reported or not)
   time       time_column, tick_column ('tick'/'t'), base_time, interval_seconds
 """
 
@@ -60,6 +62,11 @@ from ..spec import DatasetSpec
 # one-target frame is always 1, and a consumer sees one entity reported over
 # and over instead of several. The packets stay well-formed throughout.
 _ID_FALLBACKS = ("target_id", "track_id", "entity_id", "uid", "id")
+
+#: Distinguishes "the row has no such column" from "the column holds None", so
+#: a frame column that is genuinely null groups consistently instead of
+#: starting a new frame on every row.
+_MISSING = object()
 
 #: SMPTE 336 Universal Label for a standalone VMTI Local Set.
 VMTI_UL = bytes([
@@ -310,6 +317,61 @@ def _ontology_series(spec: DatasetSpec) -> bytes:
     return series(elements)
 
 
+def frames(spec: DatasetSpec, rows: list[dict]) -> list[list[dict]]:
+    """Group rows into the frames a sensor would have reported them in.
+
+    A real VMTI packet carries every target the sensor found in one frame, so a
+    scene of six things watched over forty ticks is forty packets of six — not
+    240 packets of one. That difference is not cosmetic: `totalTargetsDetected`
+    and `numTargetsReported` are per *frame*, and with one target per packet
+    their ratio is pinned at 1:1, which is exactly the number a consumer reads
+    as feed health (chaff ADR-0035).
+
+    Grouping is by **consecutive runs** of `frame_column`, never by sorting.
+    Rows arrive in the order the engine generated them — time-ordered for an
+    entity spec — and reordering them here would put the encoder in the
+    business of deciding what happened when. A column that alternates simply
+    produces more frames, which is the honest reading of it.
+
+    Absent `frame_column`, every row is its own frame, which is what this
+    encoder did before frames existed.
+    """
+    key = _opt(spec, "frame_column")
+    if not key:
+        return [[row] for row in rows]
+
+    grouped: list[list[dict]] = []
+    previous = _MISSING
+    for row in rows:
+        value = row.get(key, _MISSING)
+        if grouped and value == previous:
+            grouped[-1].append(row)
+        else:
+            grouped.append([row])
+        previous = value
+    return grouped
+
+
+def _declared_detected(spec: DatasetSpec, rows: list[dict]) -> int:
+    """How many targets the frame claims the sensor *found*, reported or not.
+
+    The gap between this and the number actually carried is the culling ratio,
+    and a consumer watches it: a source that quietly reports less of what it
+    sees looks exactly like a scene getting calmer. Absent a column, detected
+    equals reported — this encoder culls nothing and claiming otherwise would
+    fake the very number the gap exists to carry.
+
+    Never below the count actually present: a sensor cannot truthfully report
+    more targets than it detected, and emitting that would be an impossible
+    packet rather than a useful one (ADR-0032 §3 — chaff does not emit
+    malformed output).
+    """
+    declared = optional_num(spec, rows[0], "total_detected_column", ("total_detected",))
+    if declared is None:
+        return len(rows)
+    return max(int(declared), len(rows))
+
+
 def _packet(spec: DatasetSpec, rows: list[dict]) -> bytes:
     """One standalone VMTI packet: universal label, length, items, checksum."""
     items: list[bytes] = []
@@ -322,9 +384,7 @@ def _packet(spec: DatasetSpec, rows: list[dict]) -> bytes:
         if value:
             items.append(tlv(tag, str(value).encode("utf-8")))
     items.append(tlv(4, uint(int(_opt(spec, "ls_version", 1)))))
-    # Detected and reported are equal here: this encoder culls nothing, and
-    # claiming otherwise would fake the ratio a consumer reads as feed health.
-    items.append(tlv(5, uint(len(rows))))
+    items.append(tlv(5, uint(_declared_detected(spec, rows))))
     items.append(tlv(6, uint(len(rows))))
     for tag, option in ((8, "frame_width"), (9, "frame_height")):
         value = _opt(spec, option)
@@ -389,16 +449,30 @@ def _stable_target_id(raw: Any, fallback: int) -> int:
 def _klv_record(spec: DatasetSpec, record: dict) -> bytes:
     """One standalone VMTI packet carrying one target.
 
-    A frame with a single target is ordinary VMTI, and it keeps the streamed
-    bytes identical to the whole-file ones. Batching several rows into one
-    frame is a real thing a sensor does and is not expressible on the
-    per-record seam; see the ADR.
+    A frame with a single target is ordinary VMTI, and one packet per record
+    keeps the streamed bytes identical to the whole-file ones.
+
+    **A framed spec cannot stream.** A frame is several records, and the
+    per-record seam hands this function exactly one with no way to know
+    whether the next belongs beside it. Refused here, loudly, rather than
+    silently emitting one-target packets that contradict the spec's own
+    framing and quietly restore the 1:1 ratio it was written to avoid.
     """
+    if _opt(spec, "frame_column"):
+        raise ValueError(
+            "a klv spec with `frame_column` groups rows into multi-target frames, "
+            "which a per-record streaming sink cannot express: it delivers one "
+            "record at a time. Drop `frame_column` to stream one target per "
+            "packet, or use a file sink to keep the framing."
+        )
     return _packet(spec, [record])
 
 
 @encoder("klv", ".klv")
 def to_klv(spec: DatasetSpec, rows: list[dict]) -> bytes:
-    """A VMTI stream: one standalone packet per row, concatenated — identical
-    framing to the per-record encoder so file and stream match."""
-    return b"".join(_klv_record(spec, r) for r in rows)
+    """A VMTI stream: standalone packets, concatenated.
+
+    One packet per frame (see `frames`), which without `frame_column` is one
+    packet per row — identical to what the per-record encoder produces, so
+    file and stream match for every spec that can stream at all."""
+    return b"".join(_packet(spec, frame) for frame in frames(spec, rows))

@@ -298,3 +298,135 @@ def test_distinct_targets_get_distinct_ids():
         # tag, length, then the series element's own length, then the BER-OID id
         ids.add(body[marker + 3])
     assert len(ids) == len(rows), f"{len(ids)} distinct ids across {len(rows)} targets"
+
+
+# ── Multi-target frames (ADR-0035) ───────────────────────────────────
+# A real VMTI packet carries every target one frame contained. With one target
+# per packet `totalTargetsDetected` and `numTargetsReported` are pinned at 1:1,
+# and their ratio is exactly what a consumer reads as feed health.
+
+def top_level_items(packet: bytes) -> dict:
+    """The Local Set's items, by tag. Every tag this encoder emits is below
+    128, so a tag is one byte and the walker stays a test-sized thing."""
+    body = body_of(packet)
+    items, pos = {}, 0
+    while pos < len(body):
+        tag = body[pos]
+        first = body[pos + 1]
+        if first & 0x80:
+            width = first & 0x7F
+            length = int.from_bytes(body[pos + 2:pos + 2 + width], "big")
+            start = pos + 2 + width
+        else:
+            length, start = first, pos + 2
+        items[tag] = body[start:start + length]
+        pos = start + length
+    return items
+
+
+def framed_spec(rows=6, **opts):
+    options = {"base_time": "2026-01-01T00:00:00Z", "frame_column": "frame"}
+    options.update(opts)
+    return load_spec({
+        "name": "vmti", "seed": 5, "rows": rows,
+        "columns": [
+            {"name": "target_id", "generator": "row_id"},
+            {"name": "lat", "generator": "lat", "params": {"min": 34.0, "max": 34.1}},
+            {"name": "lon", "generator": "lon", "params": {"min": -118.3, "max": -118.2}},
+        ],
+        "output": {"format": "klv", "options": options},
+    })
+
+
+def rows_in(*frame_values, **extra):
+    return [{"target_id": i + 1, "lat": 34.0, "lon": -118.25, "frame": f, **extra}
+            for i, f in enumerate(frame_values)]
+
+
+def test_a_frame_carries_every_target_that_shares_its_frame_column():
+    spec = framed_spec()
+    payload = get_encoder("klv")(spec, rows_in(1, 1, 1, 2, 2))
+    assert len(packets(payload)) == 2
+    reported = [int.from_bytes(top_level_items(p)[6], "big") for p in packets(payload)]
+    assert reported == [3, 2]
+
+
+def test_without_a_frame_column_every_row_is_its_own_frame():
+    """The behaviour before frames existed, unchanged."""
+    spec = target_spec(rows=4)
+    assert len(packets(get_encoder("klv")(spec, generate_rows(spec)))) == 4
+
+
+def test_framing_groups_consecutive_runs_rather_than_sorting():
+    """Rows arrive in the order the engine generated them — time-ordered for an
+    entity spec — and reordering here would put the encoder in the business of
+    deciding what happened when. An alternating column simply makes more
+    frames, which is the honest reading of it."""
+    payload = get_encoder("klv")(framed_spec(), rows_in(1, 2, 1, 2))
+    assert len(packets(payload)) == 4
+
+
+def test_a_null_frame_value_groups_with_its_neighbours():
+    """A column that is genuinely null must group consistently, not start a new
+    frame on every row."""
+    payload = get_encoder("klv")(framed_spec(), rows_in(None, None, 1))
+    assert len(packets(payload)) == 2
+
+
+def test_a_frame_may_declare_more_detected_than_it_reports():
+    """The gap is the culling ratio: a source that quietly reports less of what
+    it sees looks exactly like a scene getting calmer."""
+    spec = framed_spec(total_detected_column="total_detected")
+    items = top_level_items(packets(
+        get_encoder("klv")(spec, rows_in(1, 1, 1, total_detected=40)))[0])
+    assert int.from_bytes(items[5], "big") == 40   # detected
+    assert int.from_bytes(items[6], "big") == 3    # reported
+
+
+def test_absent_detection_count_means_this_encoder_culled_nothing():
+    items = top_level_items(packets(get_encoder("klv")(framed_spec(), rows_in(1, 1, 1)))[0])
+    assert int.from_bytes(items[5], "big") == int.from_bytes(items[6], "big") == 3
+
+
+def test_a_frame_never_claims_to_have_detected_fewer_than_it_reports():
+    """A sensor cannot truthfully report more targets than it found, and
+    emitting that would be an impossible packet rather than a useful one."""
+    spec = framed_spec(total_detected_column="total_detected")
+    items = top_level_items(packets(
+        get_encoder("klv")(spec, rows_in(1, 1, 1, total_detected=1)))[0])
+    assert int.from_bytes(items[5], "big") == 3
+
+
+def test_every_target_in_a_frame_keeps_its_own_id():
+    spec = framed_spec()
+    packet = packets(get_encoder("klv")(spec, rows_in(1, 1, 1)))[0]
+    series_bytes = top_level_items(packet)[101]
+    ids, pos = [], 0
+    while pos < len(series_bytes):
+        length = series_bytes[pos]
+        ids.append(series_bytes[pos + 1])   # BER-OID target id, one byte here
+        pos += 1 + length
+    assert ids == [1, 2, 3]
+
+
+def test_a_framed_spec_refuses_to_stream():
+    """A frame is several records and the per-record seam delivers one, with no
+    way to know whether the next belongs beside it. Silently emitting
+    one-target packets would contradict the spec's own framing and quietly
+    restore the 1:1 ratio it was written to avoid."""
+    spec = framed_spec()
+    with pytest.raises(ValueError, match="per-record streaming sink cannot express"):
+        get_record_encoder("klv")(spec, rows_in(1)[0])
+
+
+def test_an_unframed_spec_still_streams_byte_for_byte():
+    spec = target_spec(rows=4)
+    rows = generate_rows(spec)
+    assert get_encoder("klv")(spec, rows) == b"".join(
+        get_record_encoder("klv")(spec, r) for r in rows)
+
+
+def test_framing_is_deterministic():
+    spec = framed_spec(total_detected_column="total_detected")
+    rows = rows_in(1, 1, 2, total_detected=9)
+    assert get_encoder("klv")(spec, rows) == get_encoder("klv")(spec, rows)
