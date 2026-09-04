@@ -409,6 +409,20 @@ found it reached 6 of the 12 fields that reader maps, and fabricated one.
       no longer reach the wire. All 12 mapped fields now reachable; verified by
       decoding the preset's 480 events with a real reader — 0 refusals, 0
       anomalies.
+- [x] **Kinematics, and a unit fault to test them with (ADR-0039).** ADR-0038
+      closed by noting a feed with perfect positions and backwards velocities
+      was still invisible. That gap is not a smaller version of the last one: a
+      displaced parent breaks position AND pairing, so two gates could see it,
+      while a value fault breaks neither. `scene_truth` gains `kinematics`
+      (speed and course per entity per tick, `null` where a scene carries no
+      such column — a fabricated zero would mark a consumer wrong for being
+      right), and `ObserverSpec.misreports` scales a column by a factor: a
+      sensor measuring m/s and writing KNOTS under the same name. The preset
+      puts that fault on one attribute of one feed and leaves its course alone,
+      so one number is wrong and its neighbour right in the same events.
+      Measured through the consuming scorer: 3.940 m/s of speed error against
+      0.050 degrees of course error, with pairing at 72 of 72, positions inside
+      their declared bounds, and zero refusals — every older gate green.
 - [x] **An answer key with geometry (ADR-0038).** ADR-0037 closed by naming
       what its key could not do: score *where* a consumer put things, only
       whether it paired them. That gap is exactly the shape of the displaced
