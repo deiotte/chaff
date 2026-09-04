@@ -409,6 +409,18 @@ found it reached 6 of the 12 fields that reader maps, and fabricated one.
       no longer reach the wire. All 12 mapped fields now reachable; verified by
       decoding the preset's 480 events with a real reader — 0 refusals, 0
       anomalies.
+- [x] **A parent that lies about where it is looking (ADR-0037).** ADR-0036
+      modelled a parent that *withholds* its frame centre, which a consumer
+      catches easily. This models one that supplies the WRONG centre, which no
+      consumer can catch: measured at 0 m, 250 m and 5000 m of error, the
+      decoded census is identical in every field — same packets, same
+      observations, zero refusals, zero unresolved, same attributes. A frame
+      centre is a claim the child has no way to check.
+      `frame_center_error_m` displaces the declared centre while the offsets
+      still come from the truth, so the child bytes are unchanged and the error
+      is provably the parent's. The preset is a *scene*, because one feed shows
+      nothing: against a CoT feed through a 25 m gate the consumer finds 0 of 72
+      pairs and wrongly binds none — it declines rather than errs.
 - [x] **Embedded VMTI: the other half of the position (ADR-0036).** A VMTI set
       normally travels inside an ST 0601 UAS Datalink frame as Item 74, with
       targets written as *offsets* from the frame centre the parent declares —

@@ -49,6 +49,10 @@ options:
              frame_center_elevation (metres above MSL, item 25),
              withhold_frame_center_column (truthy: omit items 23/24 for
              that frame — a parent that is not conforming, on purpose)
+  wrong      frame_center_error_m, frame_center_error_bearing_deg (declare a
+             frame centre displaced from the true one; the offsets still come
+             from the truth, so the child is unchanged and the error is
+             entirely the parent's — see `declared_centre`)
   parent     uas_ls_version (item 65, default 1)
   plus every `klv` option: the child is the same Local Set, and its frames,
   targets, tracks, classes and timing all come from there.
@@ -73,6 +77,14 @@ UAS_LS_UL = bytes([
 #: Item 25 maps [-900, 19000] metres onto a uint16.
 _ELEVATION_MIN = -900.0
 _ELEVATION_SPAN = 19000.0 - _ELEVATION_MIN
+
+#: Metres per degree of latitude. Must equal `engine._M_PER_DEG` — the engine
+#: displaces an observer's positions with it and this displaces a parent's
+#: frame centre, so the two disagreeing would make a stated error in metres
+#: mean different distances in the same scene. Duplicated rather than imported
+#: because `engine` imports this package and the cycle would not resolve; a
+#: test asserts they agree.
+_M_PER_DEG = 111_320.0
 
 
 def _round_half_away_from_zero(x: float) -> float:
@@ -169,6 +181,49 @@ def frame_centre(spec: DatasetSpec, rows: list[dict]) -> tuple[float, float]:
 _DECLARED = frozenset({"", "0", "false", "no", "off", "declared", "none"})
 
 
+def declared_centre(
+    spec: DatasetSpec,
+    row: dict,
+    true_centre: tuple[float, float],
+) -> tuple[float, float]:
+    """Where the parent *says* it is looking, which need not be where it is.
+
+    `frame_center_error_m` displaces the declared centre from the true one, on
+    a bearing given by `frame_center_error_bearing_deg` (clockwise from north,
+    default due east). The child's offsets are still computed against the true
+    centre, so **the child bytes do not change** and the whole of the error is
+    the parent's — the same discipline `withhold_frame_center_column` follows.
+
+    ## Why this is worth generating
+
+    A parent that supplies no frame centre is caught: the targets have nowhere
+    to be, and a consumer says so. A parent that supplies the **wrong** one is
+    not caught by anything, and cannot be. Every packet decodes, every offset
+    resolves, every position is finite and in range, and the targets land in a
+    plausible place that is simply not where they are. There is no signal in
+    the bytes, because the bytes are all correct — the frame centre is a claim
+    the child has no way to check.
+
+    It is only visible from **outside** the feed: against a second sensor
+    watching the same scene, or against ground truth. A generator can put a
+    known error in and let a consumer be measured on whether anything
+    downstream notices (chaff ADR-0037).
+    """
+    error_m = _number(spec, row, "frame_center_error_m", "frame_center_error_m_column")
+    if not error_m:
+        return true_centre
+    bearing = _number(spec, row, "frame_center_error_bearing_deg",
+                      "frame_center_error_bearing_deg_column")
+    radians = math.radians(90.0 if bearing is None else bearing)
+    degrees = error_m / _M_PER_DEG
+    lat = true_centre[0] + degrees * math.cos(radians)
+    # Longitude degrees shorten with latitude; the floor keeps a scene near a
+    # pole from dividing by a cosine on its way to zero.
+    scale = _M_PER_DEG * max(math.cos(math.radians(true_centre[0])), 1e-6)
+    lon = true_centre[1] + (error_m * math.sin(radians)) / scale
+    return lat, lon
+
+
 def _withheld(spec: DatasetSpec, row: dict) -> bool:
     """Whether this frame's parent declines to declare its frame centre.
 
@@ -202,8 +257,11 @@ def parent_packet(spec: DatasetSpec, rows: list[dict]) -> bytes:
     # pairing it with an implicit zero would put the whole frame on the
     # Greenwich meridian rather than declining to place it.
     if not _withheld(spec, rows[0]):
-        items.append(tlv(23, mapped_int32(centre[0], 90.0)))
-        items.append(tlv(24, mapped_int32(centre[1], 180.0)))
+        # What the parent CLAIMS, which `frame_center_error_m` may displace from
+        # the truth the offsets below were measured against.
+        claimed = declared_centre(spec, rows[0], centre)
+        items.append(tlv(23, mapped_int32(claimed[0], 90.0)))
+        items.append(tlv(24, mapped_int32(claimed[1], 180.0)))
         elevation = _number(spec, rows[0], "frame_center_elevation",
                             "frame_center_elevation_column")
         if elevation is not None:

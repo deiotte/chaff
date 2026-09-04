@@ -1,4 +1,6 @@
-"""MISB ST 0601 parent frames carrying embedded VMTI (Phase 9, ADR-0036)."""
+"""MISB ST 0601 parent frames carrying embedded VMTI (Phase 9, ADR-0036, ADR-0037)."""
+
+import math
 
 import pytest
 
@@ -6,6 +8,7 @@ from chaff.formats import get_encoder, get_record_encoder
 from chaff.formats.klv import ber_length, checksum_16, local_set
 from chaff.formats.st0601 import (
     UAS_LS_UL,
+    declared_centre,
     _elevation,
     _round_half_away_from_zero,
     frame_centre,
@@ -277,3 +280,79 @@ def test_seed_determinism_is_byte_for_byte():
     first = get_encoder("klv0601")(spec, rows_in(spec))
     second = get_encoder("klv0601")(embedded_spec(), rows_in(embedded_spec()))
     assert first == second
+
+
+# ── A parent that lies about where it is looking (ADR-0037) ──────────
+
+def haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    import math
+    dlat, dlon = math.radians(b[0] - a[0]), math.radians(b[1] - a[1])
+    h = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(a[0])) * math.cos(math.radians(b[0])) * math.sin(dlon / 2) ** 2)
+    return 2 * 6_371_000 * math.asin(math.sqrt(h))
+
+
+def test_no_declared_error_means_the_parent_tells_the_truth():
+    spec = embedded_spec()
+    assert declared_centre(spec, rows_in(spec)[0], (34.07, -118.26)) == (34.07, -118.26)
+    zero = embedded_spec(frame_center_error_m=0)
+    assert declared_centre(zero, rows_in(zero)[0], (34.07, -118.26)) == (34.07, -118.26)
+
+
+@pytest.mark.parametrize("metres", [10.0, 250.0, 5000.0])
+def test_the_declared_centre_is_displaced_by_the_metres_asked_for(metres):
+    true_centre = (34.07, -118.26)
+    spec = embedded_spec(frame_center_error_m=metres, frame_center_error_bearing_deg=45.0)
+    claimed = declared_centre(spec, rows_in(spec)[0], true_centre)
+    # Within 1%: the option works in flat-earth metres per degree, as the engine does when it
+    # displaces an observer, so the two agree with each other rather than with a geoid.
+    assert abs(haversine_m(true_centre, claimed) - metres) < metres * 0.01
+
+
+@pytest.mark.parametrize("bearing,dlat,dlon", [
+    (0.0, 1, 0), (90.0, 0, 1), (180.0, -1, 0), (270.0, 0, -1),
+])
+def test_the_bearing_points_where_it_says(bearing, dlat, dlon):
+    """Clockwise from north, as a bearing is everywhere else."""
+    true_centre = (34.07, -118.26)
+    spec = embedded_spec(frame_center_error_m=500.0, frame_center_error_bearing_deg=bearing)
+    lat, lon = declared_centre(spec, rows_in(spec)[0], true_centre)
+    for got, want in ((lat - true_centre[0], dlat), (lon - true_centre[1], dlon)):
+        assert (abs(got) < 1e-9) if want == 0 else (got * want > 0)
+
+
+def test_displacing_the_parent_leaves_the_child_untouched():
+    """**The property the whole option exists for.**
+
+    A frame centre is a claim the child has no way to check, so the error must be provably the
+    parent's — which it is only if the child bytes are identical either way. Computing the offsets
+    from the declared centre instead of the true one would make the packet self-consistent and
+    the error would vanish entirely.
+    """
+    rows = rows_in(embedded_spec())
+    honest = embedded_spec()
+    lying = embedded_spec(frame_center_error_m=250.0, frame_center_error_bearing_deg=45.0)
+
+    honest_body = items(parent_body(parent_packet(honest, rows)))
+    lying_body = items(parent_body(parent_packet(lying, rows)))
+
+    assert honest_body[74] == lying_body[74], "the child must be byte-identical"
+    assert honest_body[23] != lying_body[23], "the parent's latitude must differ"
+    assert honest_body[24] != lying_body[24], "the parent's longitude must differ"
+
+
+def test_the_metres_per_degree_constant_matches_the_engines():
+    """The engine displaces an observer's positions with its constant and this displaces a
+    parent's frame centre with a copy of it. If they drifted apart, a scene stating both errors
+    in metres would mean two different distances, and the one number a reader compares them by
+    would be wrong."""
+    from chaff.engine import _M_PER_DEG as engine_constant
+
+    from chaff.formats.st0601 import _M_PER_DEG as encoder_constant
+    assert encoder_constant == engine_constant
+
+
+def test_a_polar_scene_does_not_divide_by_a_vanishing_cosine():
+    spec = embedded_spec(frame_center_error_m=100.0, frame_center_error_bearing_deg=90.0)
+    lat, lon = declared_centre(spec, rows_in(spec)[0], (90.0, 0.0))
+    assert math.isfinite(lat) and math.isfinite(lon)
