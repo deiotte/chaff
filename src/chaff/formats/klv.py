@@ -191,6 +191,11 @@ _SIGMA = Imapb(0.0, 650.0, 2)
 _KINEMATIC = Imapb(-900.0, 900.0, 2)
 _PERCENT = Imapb(0.0, 100.0, 3)
 _FOV = Imapb(0.0, 180.0, 2)
+#: Items 10 and 11 — a target's offset from its parent frame centre. Only ever
+#: meaningful for embedded VMTI, and the ±19.2° range is the standard's, not a
+#: choice: a target further than that from where the camera is looking cannot
+#: be expressed as an offset at all.
+_OFFSET = Imapb(-19.2, 19.2, 3)
 
 
 # ── VMTI ─────────────────────────────────────────────────────────────
@@ -204,8 +209,28 @@ def _classes(spec: DatasetSpec) -> list[dict]:
     return [c for c in raw if isinstance(c, dict) and c.get("iri")]
 
 
-def _target_pack(spec: DatasetSpec, row: dict, target_id: int) -> bytes:
-    """One VTarget Pack: a BER-OID target id, then its items in tag order."""
+def _target_pack(
+    spec: DatasetSpec,
+    row: dict,
+    target_id: int,
+    centre: tuple[float, float] | None = None,
+) -> bytes:
+    """One VTarget Pack: a BER-OID target id, then its items in tag order.
+
+    `centre` switches the position between the two shapes ST 0903.6 gives a
+    target, which are mutually exclusive and not interchangeable:
+
+    - **absent** — item 17, an absolute location the sensor measured, carrying
+      its positional sigmas when the row states them.
+    - **present** — items 10 and 11, offsets from the parent frame centre, as
+      an embedded child carries instead (§8.3). Item 12 (height) rides along
+      because a height above the ellipsoid is absolute and needs no parent.
+
+    Never both. A consumer that sees item 17 prefers it — resolving an offset
+    stacks the parent's frame-centre error on the child's — so emitting both
+    would leave the offsets dead weight and the embedded path untested by the
+    very packets written to exercise it.
+    """
     items: list[bytes] = []
 
     def num(option: str, fallbacks: tuple[str, ...] = ()) -> float | None:
@@ -225,13 +250,27 @@ def _target_pack(spec: DatasetSpec, row: dict, target_id: int) -> bytes:
     add_int(7, "percent_pixels_column", ("percent_pixels",), single_byte=True)
     add_int(9, "intensity_column", ("intensity",))
 
-    # Item 17 — absolute location. The 16-byte pack when the row states its
-    # positional sigmas, the 10-byte truncation when it does not: reporting
-    # sigmas nobody measured would be inventing the one number a consumer
-    # turns into position confidence.
     lat, lon = num("lat_column", ("lat",)), num("lon_column", ("lon",))
-    if lat is not None and lon is not None:
-        hae = num("hae_column", ("hae",))
+    hae = num("hae_column", ("hae",))
+
+    if centre is not None:
+        # Items 10, 11 — the displacement from the parent's frame centre, which
+        # is what makes this an embedded child rather than a standalone set.
+        # Both or neither: half a displacement is not a position, and pairing
+        # one real offset with an implicit zero would put the target on the
+        # frame centre's own meridian.
+        if lat is not None and lon is not None:
+            items.append(tlv(10, _OFFSET.encode(lat - centre[0])))
+            items.append(tlv(11, _OFFSET.encode(lon - centre[1])))
+        # Item 12 — height above the ellipsoid, absolute and parentless, so it
+        # stands whether or not the offsets above ever resolve.
+        if hae is not None:
+            items.append(tlv(12, _HAE.encode(hae)))
+    elif lat is not None and lon is not None:
+        # Item 17 — absolute location. The 16-byte pack when the row states its
+        # positional sigmas, the 10-byte truncation when it does not: reporting
+        # sigmas nobody measured would be inventing the one number a consumer
+        # turns into position confidence.
         value = _LAT.encode(lat) + _LON.encode(lon) + _HAE.encode(hae or 0.0)
         sigmas = [num(f"sigma_{d}_column", (f"sigma_{d}",)) for d in ("east", "north", "up")]
         if all(s is not None for s in sigmas):
@@ -372,8 +411,21 @@ def _declared_detected(spec: DatasetSpec, rows: list[dict]) -> int:
     return max(int(declared), len(rows))
 
 
-def _packet(spec: DatasetSpec, rows: list[dict]) -> bytes:
-    """One standalone VMTI packet: universal label, length, items, checksum."""
+def local_set(
+    spec: DatasetSpec,
+    rows: list[dict],
+    centre: tuple[float, float] | None = None,
+) -> bytes:
+    """The VMTI Local Set body: items only, no label, no length, no checksum.
+
+    This is what an embedded child is — ST 0601 Item 74 carries exactly these
+    bytes, with the parent supplying the framing. `standalone` wraps the same
+    body for a feed that has no parent, so the two framings share one encoder
+    and cannot drift apart.
+
+    `centre` is passed through to each target: with it they carry frame-centre
+    offsets, without it absolute locations. See `_target_pack`.
+    """
     items: list[bytes] = []
 
     # Item 2 first — ST 0903.6 §10.1.2 requires the timestamp lead the set.
@@ -400,14 +452,18 @@ def _packet(spec: DatasetSpec, rows: list[dict]) -> bytes:
     for offset, row in enumerate(rows, start=1):
         key = first_key(row, ids, _ID_FALLBACKS)
         raw = row.get(key) if key else None
-        packs.append(_target_pack(spec, row, _stable_target_id(raw, offset)))
+        packs.append(_target_pack(spec, row, _stable_target_id(raw, offset), centre))
     items.append(tlv(101, series(packs)))
 
     ontologies = _ontology_series(spec)
     if ontologies:
         items.append(tlv(103, ontologies))
 
-    body = b"".join(items)
+    return b"".join(items)
+
+
+def standalone(body: bytes) -> bytes:
+    """Wrap a Local Set body as a standalone packet: label, length, checksum."""
     # The checksum item is `01 02 hi lo` and lives inside the declared length.
     declared = len(body) + 4
     packet = VMTI_UL + ber_length(declared) + body + b"\x01\x02\x00\x00"
@@ -415,6 +471,11 @@ def _packet(spec: DatasetSpec, rows: list[dict]) -> bytes:
     # byte — everything but the two value bytes just reserved.
     covered = len(packet) - 2
     return packet[:covered] + checksum_16(packet[:covered]).to_bytes(2, "big")
+
+
+def _packet(spec: DatasetSpec, rows: list[dict]) -> bytes:
+    """One standalone VMTI packet: universal label, length, items, checksum."""
+    return standalone(local_set(spec, rows))
 
 
 def _stable_target_id(raw: Any, fallback: int) -> int:
