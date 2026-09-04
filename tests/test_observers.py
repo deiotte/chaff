@@ -167,6 +167,55 @@ def test_truth_agrees_with_what_the_feeds_actually_carry():
         assert claimed == {r["uid"] for r in rows}
 
 
+def test_truth_carries_where_everything_really_was():
+    """One track per entity, one position per tick, in tick order."""
+    spec = scene([{"name": "a", "id_pattern": "A-####"}])
+    truth = scene_truth(spec)
+    assert set(truth["positions"]) == set(truth["identities"])
+    assert {len(t) for t in truth["positions"].values()} == {spec.entity.ticks}
+    assert all(len(p) == 2 and all(isinstance(v, float) for v in p)
+               for track in truth["positions"].values() for p in track)
+
+
+def test_truth_positions_are_the_scene_not_an_observers_account():
+    """**The property the positional gate rests on.**
+
+    Scoring a displaced account against another displaced account would measure the difference
+    between two guesses. The key must carry the scene's own geometry, so an observer with error
+    disagrees with it and an observer without error matches it exactly.
+    """
+    spec = scene([{"name": "clean", "position_error_m": 0.0},
+                  {"name": "noisy", "position_error_m": 25.0}])
+    truth = scene_truth(spec)
+    feeds = {n: r for n, _, r in observer_views(spec)}
+    flat = [p for entity in sorted(truth["positions"]) for p in truth["positions"][entity]]
+
+    clean = sorted((r["lat"], r["lon"]) for r in feeds["clean"])
+    assert clean == sorted((p[0], p[1]) for p in flat)
+
+    noisy = sorted((r["lat"], r["lon"]) for r in feeds["noisy"])
+    assert noisy != clean, "an observer with error must not match the truth it was derived from"
+
+
+def test_truth_states_what_each_observer_claims_its_error_is():
+    """The bound a consumer is held to is the emitter's own claim, so it has to travel with the
+    key rather than being restated by whoever reads it."""
+    truth = scene_truth(scene([{"name": "a", "position_error_m": 6.0},
+                               {"name": "b", "position_error_m": 12.0}]))
+    assert truth["observer_error_m"] == {"a": 6.0, "b": 12.0}
+
+
+def test_every_observers_reports_land_inside_the_declared_error():
+    """What `observer_error_m` promises, checked against the rows it describes. Bounded rather
+    than Gaussian, so this holds for every report and not merely most."""
+    spec = scene([{"name": "a", "position_error_m": 6.0},
+                  {"name": "b", "position_error_m": 12.0}])
+    truth = generate_entity_rows(spec)
+    declared = scene_truth(spec)["observer_error_m"]
+    for name, _, rows in observer_views(spec):
+        assert all(metres(t, o) <= declared[name] + 1e-6 for t, o in zip(truth, rows))
+
+
 def test_truth_is_never_a_feed():
     """It ships beside the feeds as its own member, and no feed contains it."""
     members = encode_observers(scene([{"name": "a", "id_pattern": "A-####"}]))
