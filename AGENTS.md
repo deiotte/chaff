@@ -61,6 +61,13 @@ CI installs a browser and sets `CHAFF_REQUIRE_BROWSER_TESTS=1` so a skip
 there is a failure. To run them locally:
 `pip install -e '.[dev-browser]' && python -m playwright install chromium`.
 
+The action-runtime check (ADR-0041) works the same way: it reads each pinned
+action's `action.yml` at its pinned SHA to catch a workflow landing back on a
+deprecated Node runtime, so it needs the network and **skips** without it.
+CI sets `CHAFF_REQUIRE_ACTION_RUNTIME_TESTS=1`. When GitHub deprecates the
+next Node major, add it to `DEPRECATED_NODE_RUNTIMES` in
+`tests/test_supply_chain.py` — the list is a deny-list on purpose.
+
 Every change lands with: tests updated, `make check` green, ADR if a decision
 was made, ROADMAP.md updated if scope moved. Don't batch phases — finish and
 verify one before starting the next.
