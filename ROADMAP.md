@@ -363,10 +363,22 @@ unless a specific claim fails to reproduce.
       branch protection on `.github/workflows/**`. Neither is a code change.
       Pinning also does not *verify*: `pip install -e .` still resolves ranges
       at build time, with no lockfile or SBOM.
-- [ ] **Bump the Node 20 actions.** `actions/checkout@v4` and
-      `actions/setup-python@v5` are pinned at the versions in use and emit a
-      deprecation warning. Bumping majors is a deliberate change with breaking
-      potential, not a rider on a security fix — do it on its own.
+- [x] **Bump the Node 20 actions (ADR-0041).** Closed with no bump left to
+      make: Dependabot did it one PR at a time, exactly as ADR-0031 §5
+      intended — `checkout` v4→v7, `setup-python` v5→v7, `upload-artifact`→v7,
+      `download-artifact`→v8, `action-gh-release` v2→v3. All five now resolve
+      to `using: node24` and sit at the tip of their major.
+      What the item leaves behind is the gap it exposed: `test_supply_chain.py`
+      asserts a pin is a 40-hex SHA with a version comment, which a Node 20 pin
+      satisfies perfectly — the suite read green through the whole deprecation
+      it was written alongside. So the deliverable is the guard, not the bump:
+      a test that dereferences each pinned SHA, reads `runs.using` from the
+      action's own `action.yml`, and fails on a retired runtime. Mutation-
+      verified by pinning `checkout` back to v4.2.2 (fails, naming the action
+      and the runtime) and by cutting the network (skips clean, and fails loudly
+      under the CI flag).
+      **Residual:** a deny-list, so GitHub deprecating node24 needs a human to
+      add it; `using: composite` passes without its steps being inspected.
 - [x] **F-07/F-08 Output injection into spreadsheets and SQL (ADR-0028).**
       `=HYPERLINK(...)` reached CSV as a live formula and .xlsx as a real
       formula cell; a dataset named `x]; DROP TABLE audit;--` closed its own

@@ -8,11 +8,18 @@ same bytes".
 These are config assertions rather than behaviour assertions, which makes them
 easy to write hollow. Each one names the specific thing that would go wrong,
 and each was checked by reintroducing it.
+
+The last tier goes further than config and reads what each pinned action
+*actually is* — see ADR-0041. It is the only part of this file that touches
+the network, and it skips rather than fails when it cannot.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -148,3 +155,134 @@ def test_something_bumps_the_pins():
     assert {"github-actions", "docker"} <= ecosystems, (
         f"dependabot covers {sorted(ecosystems)}; the pinned inputs are "
         "github-actions and docker")
+
+
+# ── What the pin actually runs on (ADR-0041) ─────────────────────────
+# ADR-0031 pinned the five actions at the versions already in use and parked
+# the Node 20 deprecation as its own deliberate piece of work. Dependabot has
+# since done the bumping. This tier is what stops it coming back: to every
+# assertion above, a pin at a dead runtime is a perfectly well-formed SHA.
+
+#: Node runtimes GitHub has deprecated. A step on one of these still runs
+#: today and only warns — right up until the runner drops the runtime, at
+#: which point every workflow using it fails at once, on a commit that
+#: changed nothing.
+#:
+#: Deliberately a deny-list. An allow-list would fail this build the day
+#: GitHub ships node28, which is a false alarm, and a guard that cries wolf
+#: gets deleted. Add the next runtime here when GitHub announces it.
+DEPRECATED_NODE_RUNTIMES = {"node12", "node16", "node20"}
+
+#: Reading `runs.using` means reading the action's own action.yml at the
+#: pinned SHA, which needs the network. Same bargain as the browser tests
+#: (ADR-0022): skip by default so `make check` stays runnable offline, and
+#: let CI set this so a skip there is a failure instead of a silent hole.
+REQUIRE_RUNTIME_CHECK = os.environ.get("CHAFF_REQUIRE_ACTION_RUNTIME_TESTS") == "1"
+
+RAW = "https://raw.githubusercontent.com"
+
+
+class _Unreachable(Exception):
+    """GitHub raw could not answer — a skip locally, a failure in CI."""
+
+
+def pinned_actions() -> dict[str, str]:
+    """Every distinct `owner/repo[/path]@sha` in the workflows, to its comment.
+
+    Deduplicated: the same action appears in all three workflows, and the
+    runtime is a property of the pin, not of the file it is written in.
+    """
+    pins: dict[str, str] = {}
+    for path in WORKFLOWS:
+        for line in uses_lines(path.read_text()):
+            ref, _, comment = line.partition("#")
+            ref = ref.strip()
+            if "@" in ref:
+                pins[ref] = comment.strip() or "no version comment"
+    return pins
+
+
+PINS = pinned_actions()
+
+
+def _metadata_urls(ref: str) -> list[str]:
+    """Both spellings of an action's metadata file, at the pinned commit.
+
+    Handles an action living in a subdirectory (`owner/repo/path@sha`), which
+    PINNED allows even though nothing here uses one today.
+    """
+    location, sha = ref.rsplit("@", 1)
+    owner, repo, *subpath = location.split("/")
+    base = "/".join([RAW, owner, repo, sha, *subpath])
+    return [f"{base}/action.yml", f"{base}/action.yaml"]
+
+
+def _read(url: str) -> str | None:
+    """The body, or None on 404. Anything else means we could not look."""
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            return response.read().decode()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        # A rate limit or a 5xx did not tell us the runtime is *bad*, only
+        # that we could not read it. That is unreachable, not a failure.
+        raise _Unreachable(f"{url} answered HTTP {e.code}") from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise _Unreachable(f"cannot reach {RAW} ({e})") from e
+
+
+def action_runtime(ref: str) -> str:
+    """`runs.using` for an action, read at the commit we actually pinned."""
+    for url in _metadata_urls(ref):
+        body = _read(url)
+        if body is not None:
+            break
+    else:
+        raise AssertionError(
+            f"{ref} has no action.yml or action.yaml at that commit, so the "
+            "pin does not point at a usable action")
+    runs = (yaml.safe_load(body) or {}).get("runs")
+    if not isinstance(runs, dict) or "using" not in runs:
+        raise AssertionError(f"{ref} declares no runs.using in {url}")
+    return str(runs["using"])
+
+
+def _unreachable(reason: str):
+    """Fail when the environment promised network, else skip."""
+    if REQUIRE_RUNTIME_CHECK:
+        pytest.fail(
+            f"{reason} — CHAFF_REQUIRE_ACTION_RUNTIME_TESTS=1 says this must "
+            "run. A skip in CI leaves the runtime unchecked.")
+    pytest.skip(
+        f"{reason}; set CHAFF_REQUIRE_ACTION_RUNTIME_TESTS=1 to require it")
+
+
+def test_there_are_pins_to_check():
+    # Guards the guard, like test_there_are_workflows_to_check above: a
+    # parametrize over an empty dict collects nothing and reports green.
+    assert len(PINS) >= 5, f"expected the pinned actions, found {sorted(PINS)}"
+
+
+@pytest.mark.parametrize("ref", sorted(PINS), ids=lambda r: r.rsplit("@", 1)[0])
+def test_no_action_runs_on_a_deprecated_node_runtime(ref):
+    """The other half of "pinned": a SHA can be immutable and still be dead.
+
+    Proposing the bump is Dependabot's job. Noticing that a pin went
+    *backwards* — a hand-edited SHA, a bad conflict resolution, a revert that
+    took the workflow with it — is this one's.
+    """
+    try:
+        using = action_runtime(ref)
+    except _Unreachable as e:
+        # Reported outside the handler so the failure reads as one line
+        # instead of a chained urllib traceback.
+        unreachable = str(e)
+    else:
+        unreachable = None
+    if unreachable is not None:
+        _unreachable(unreachable)
+    assert using not in DEPRECATED_NODE_RUNTIMES, (
+        f"{ref} ({PINS[ref]}) runs on {using}, which GitHub has deprecated. "
+        "It only warns today and stops running when the runner drops the "
+        "runtime. Bump the action to a major that runs on a current Node.")

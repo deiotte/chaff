@@ -27,10 +27,14 @@ jobs:
       - name: Install Chromium for Playwright
         run: python -m playwright install --with-deps chromium
       - name: make check
-        # A skipped browser test in CI is a hole, not a pass: this makes the
-        # UI suite fail loudly if the browser install above ever breaks.
+        # A skipped test in CI is a hole, not a pass. Both flags turn a skip
+        # into a failure: the first if the browser install above ever breaks,
+        # the second if the action-runtime check (ADR-0041) can't reach
+        # GitHub to read what each pinned action actually runs on. Both tiers
+        # skip by default so `make check` stays runnable offline.
         env:
           CHAFF_REQUIRE_BROWSER_TESTS: "1"
+          CHAFF_REQUIRE_ACTION_RUNTIME_TESTS: "1"
         run: make check
 
   docker:
