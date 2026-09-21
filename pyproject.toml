@@ -34,7 +34,7 @@ dev = ["pytest>=8.0", "httpx>=0.27"]
 # Browser-driven UI tests (ADR-0022). Optional on purpose: `make check` is the
 # definition of green for every contributor, so tests/test_ui_browser.py skips
 # when this isn't installed. CI installs it and runs them for real.
-dev-browser = ["playwright>=1.40"]
+dev-browser = ["playwright>=1.62.0"]
 
 [project.scripts]
 chaff = "chaff.cli:app"
