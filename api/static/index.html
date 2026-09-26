@@ -536,6 +536,11 @@ function addColumn(name = '', generator = '', params = null, nullRate = 0,
 // gives you the dataset the preset actually describes. Dropping them silently
 // would hand Joe confidently-wrong data — the one outcome worse than an error.
 let advanced = { entity: null, tables: null };
+// Top-level parts no editor shows: the description, and the format options
+// (CoT timing, VMTI frame geometry, SQL dialect). Carried back out the same
+// way. The sink is deliberately not: a preset's sink is a CLI file path, the
+// batch tab delivers by download, and the Stream tab builds its own.
+let loaded = { description: null, output: null };
 
 function loadSpecIntoForm(spec) {
   $('name').value = spec.name || 'dataset';
@@ -545,6 +550,7 @@ function loadSpecIntoForm(spec) {
   $('cols').innerHTML = '';
   (spec.columns || []).forEach(c => addColumn(c.name, c.generator, c.params, c.null_rate));
   advanced = { entity: spec.entity || null, tables: spec.tables || null };
+  loaded = { description: spec.description ?? null, output: spec.output || null };
   renderAdvancedUI();
   // A spec saved before ADR-0027 can still hold a credential on disk. It is
   // stripped on the way out, so say so — otherwise the sink just fails later
@@ -689,7 +695,11 @@ function renderTablesEditor() {
 // normal mid-edit; throwing there would break the Remove button.
 function syncAdvancedFromEditors(validate = false) {
   if (entityEnabled() && $('entCount')) {
+    // Spread the loaded entity first: fields this editor doesn't show (the
+    // observers) must survive the read-back, or a two-sensor scene goes out
+    // as its own truth.
     advanced.entity = {
+      ...advanced.entity,
       count: parseInt($('entCount').value, 10) || 1,
       ticks: parseInt($('entTicks').value, 10) || 1,
       id_column: $('entIdCol').value.trim() || 'entity_id',
@@ -707,6 +717,7 @@ function syncAdvancedFromEditors(validate = false) {
     };
     const pat = $('entIdPat').value.trim();
     if (pat) advanced.entity.id_pattern = pat;
+    else delete advanced.entity.id_pattern;
   }
   const cards = [...$('tablesEditor').querySelectorAll('.tbl')];
   advanced.tables = cards.length ? cards.map((c, i) => {
@@ -779,6 +790,11 @@ function baseSpec(format) {
     output: { format },
   };
   if (seedRaw !== '') spec.seed = parseInt(seedRaw, 10);
+  if (loaded.description) spec.description = loaded.description;
+  // Options belong to the format they were written for: CoT timing means
+  // nothing to CSV, so a changed format starts clean.
+  const opts = loaded.output && loaded.output.format === format && loaded.output.options;
+  if (opts && Object.keys(opts).length) spec.output.options = opts;
   // Carry the parts the form doesn't edit straight back out, so what we send
   // is what was loaded. An entity spec derives its length from count × ticks,
   // so the `rows` box doesn't apply and would only be misleading.

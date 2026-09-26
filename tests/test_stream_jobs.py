@@ -134,6 +134,26 @@ def test_whole_file_format_is_rejected_before_starting():
     assert "no per-record encoder" in r.json()["detail"]
 
 
+def test_observer_spec_is_rejected_before_starting():
+    """A push job carries one feed; an observer scene is several. Before the
+    guard, the job streamed the scene's truth rows as if they were a sensor
+    feed — HTTP 200 and the wrong scenario. The CLI and WebSocket refuse, so
+    this must too, and before a job (or a socket) exists."""
+    import json
+    from pathlib import Path
+
+    spec = json.loads(Path("examples/correlated_scene.json").read_text())
+    assert len(spec["entity"]["observers"]) == 2  # the premise of the test
+    spec["sink"] = {"sink": "mem_test", "options": {"topic": "demo"}}
+    before = client.get("/stream/jobs").json()
+
+    r = client.post("/stream/jobs", json={"spec": spec, "max_records": 5, "max_seconds": 30})
+
+    assert r.status_code == 422
+    assert "one feed per observer" in r.json()["detail"]
+    assert client.get("/stream/jobs").json() == before, "a job was launched anyway"
+
+
 def test_status_404_for_unknown_job():
     assert client.get("/stream/jobs/nope").status_code == 404
     assert client.delete("/stream/jobs/nope").status_code == 404

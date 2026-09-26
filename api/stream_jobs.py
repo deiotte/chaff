@@ -140,6 +140,13 @@ def start_job(spec: DatasetSpec, *, max_records, max_seconds, rate=None) -> Stre
     """Validate the guardrail + streamability, then launch a background job."""
     if spec.tables:
         raise StreamJobError("multi-table specs can't be streamed (one file per table)")
+    # Without this the job streams the scene's truth as one feed — the one
+    # thing no observer emits — and the receiver is tested against the wrong
+    # scenario with nothing said. The CLI and the WebSocket already refuse.
+    if spec.entity and spec.entity.observers:
+        raise StreamJobError(
+            "observer specs produce one feed per observer; a push job carries one. "
+            "Stream a single observer by removing the others from the spec.")
     sink_id = spec.sink.sink
     if not is_stream_sink(sink_id):
         raise StreamJobError(
