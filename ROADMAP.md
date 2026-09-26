@@ -525,9 +525,46 @@ found it reached 6 of the 12 fields that reader maps, and fabricated one.
       `examples/vmti_frames.json` — 40 frames of 6, report ratio moving
       0.188..1.000, a consumer's culling flag raised on 38 of 40.
 
+- [x] **The round-trip, checked whole (ADR-0042).** An external review found
+      ADR-0020 had lapsed: the page's entity editor dropped `observers`, the
+      spec skeleton dropped every `output.options`, and `POST /stream/jobs`
+      streamed an observer scene's truth as one feed where the CLI and the
+      WebSocket refuse. Loading `skewed_clock` and pressing Download gave one
+      feed with default timing and no fault. The page now carries what no
+      editor shows, format options only while their format is chosen, and not
+      the CLI-only sink; push jobs refuse observer specs before connecting. A
+      browser test now compares the whole normalized spec for every preset —
+      all 20 failed before, all pass now.
+
 ### Deferred
 - Embedded VMTI: an ST 0601 parent frame carrying a VMTI set as Item 74. The
   last shape of this format chaff cannot produce.
+
+## Phase 10 — Scenario testing (from the 2026-09-26 external review)
+Controlled, repeatable scenarios: describe a situation, script specific sensor
+problems, and check how a receiving system handles them. Built into the
+`entity`/`observers` seams, not around them. Explicit schedules first; seeded
+probabilities only where they earn their place (INV-3).
+- [ ] **Scripted routes and sensor visibility (next milestone; ADR first).**
+      Waypoints, speed in m/s and planned stops, replacing degrees-per-tick
+      movement with reported speed generated separately. Per-observer
+      visibility windows, scheduled missed detections and outages, and a new
+      id on reacquisition. The answer key must become time-dependent (who saw
+      what, under which id, when) — today it assumes stable ids and complete
+      visibility. First preset: two vehicles cross, one sensor is blind for
+      ten seconds, the other keeps reporting, the first reacquires under a new
+      id.
+- [ ] **Synchronized live feeds (backlog).** One destination per observer, one
+      scenario clock, one Start/Stop with per-feed status; event time kept
+      separate from delivery time. A live start time read from the clock must
+      be recorded with the run so replay stays byte-for-byte — needs an ADR
+      against INV-3. First destination: CoT into a TAK lab server, which needs
+      TLS/client certificates the raw TCP sink lacks, plus stream-job
+      credential redaction and reliable cancellation.
+- [ ] **Run bundles (backlog).** Resolved spec, seed, start time, chaff
+      revision and dependency versions; feed hashes, expected counts, delivery
+      results; the answer key kept apart from what the receiver gets, and a
+      plain-language statement of the intended test.
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)

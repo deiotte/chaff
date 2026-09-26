@@ -14,8 +14,11 @@ Skips (never fails) without Playwright or a Chromium build — see conftest.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+
+from chaff.spec import DatasetSpec
 
 
 @pytest.fixture
@@ -179,6 +182,81 @@ def test_removing_an_entity_returns_a_flat_table(page, sent):
     assert not page.locator("#rows").is_disabled()
     _preview(page)
     assert "entity" not in sent["preview"]
+
+
+# ── every preset survives the page, not just the ones a test names ────
+#
+# The ADR-0020 guard checked `entity` was present, not that it was intact:
+# the entity editor rebuilt it from its own inputs and dropped `observers`,
+# and the spec skeleton rewrote `output` as `{format}` and dropped the
+# options. A two-sensor CoT scene went out as one feed with default timing.
+# Comparing whole normalized specs, per preset, catches the next field too.
+
+EXAMPLES = Path(__file__).resolve().parent.parent / "examples"
+PRESETS = sorted(EXAMPLES.glob("*.json"))
+
+
+def _normalized(spec):
+    """The spec as the engine will see it, minus what the page doesn't own:
+    `rows` means nothing under an entity, and `sink` is the delivery — the
+    batch tab downloads, and a preset's sink is only a CLI file path."""
+    s = DatasetSpec.model_validate(spec).model_dump(mode="json")
+    if s["entity"]:
+        s["rows"] = None
+    del s["sink"]
+    return s
+
+
+def _load_named(page, name):
+    """What a gallery card's click runs, by exact name — card text matching
+    can't tell `orders` from `orders_with_totals`."""
+    page.evaluate("n => loadNamed(n)", name)
+    page.wait_for_timeout(300)
+
+
+@pytest.mark.parametrize("path", PRESETS, ids=lambda p: p.stem)
+def test_every_preset_round_trips_through_the_form(page, sent, path):
+    _load_named(page, path.stem)
+    _preview(page)
+    assert _normalized(sent["preview"]) == _normalized(json.loads(path.read_text()))
+
+
+def test_download_and_save_carry_observers_and_format_options(page, sent, tmp_path, monkeypatch):
+    """Preview, Download and Save share one builder today; this pins that the
+    two buttons that leave a lasting file carry the scenario too."""
+    monkeypatch.setenv("CHAFF_LIBRARY_DIR", str(tmp_path))
+    preset = json.loads((EXAMPLES / "skewed_clock.json").read_text())
+    _load_named(page, "skewed_clock")
+
+    page.locator("#downloadBtn").click()
+    page.locator("#saveName").fill("skewed_copy")
+    page.locator("#saveBtn").click()
+    page.wait_for_timeout(1500)
+
+    for endpoint in ("generate", "skewed_copy"):
+        spec = sent[endpoint]
+        assert spec["entity"]["observers"] == preset["entity"]["observers"], endpoint
+        assert spec["output"]["options"] == preset["output"]["options"], endpoint
+    saved = json.loads((tmp_path / "skewed_copy.json").read_text())
+    assert saved["entity"]["observers"] and saved["output"]["options"]
+
+
+def test_changing_format_drops_the_old_formats_options(page, sent):
+    """CoT timing means nothing to CSV; carrying it would be a spec that
+    says one thing and does another."""
+    _load_named(page, "cot_tracks")
+    page.locator("#format").select_option("csv")
+    _preview(page)
+    assert sent["preview"]["output"] == {"format": "csv"}
+
+
+def test_clearing_the_id_pattern_removes_it(page, sent):
+    """The entity read-back now starts from the loaded entity, so a field the
+    user empties has to be removed, not left at its loaded value."""
+    _load_named(page, "correlated_multikind")
+    page.locator("#entIdPat").fill("")
+    _preview(page)
+    assert "id_pattern" not in sent["preview"]["entity"]
 
 
 # ── invariants the page has to hold on its own ───────────────────────
