@@ -12,27 +12,22 @@
       }
     },
     {
-      "name": "court",
-      "generator": "choice_weighted",
+      "name": "assigned_judge_id",
+      "generator": "fk",
       "params": {
-        "values": [
-          "Northern District",
-          "Southern District",
-          "Eastern District",
-          "Western District",
-          "Central District",
-          "Metro Division",
-          "Coastal Division"
-        ],
-        "weights": [
-          0.14,
-          0.16,
-          0.12,
-          0.2,
-          0.13,
-          0.15,
-          0.1
-        ]
+        "table": "judges",
+        "column": "judge_id",
+        "where": {
+          "bench": "District"
+        }
+      }
+    },
+    {
+      "name": "court",
+      "generator": "parent",
+      "params": {
+        "via": "assigned_judge_id",
+        "column": "court"
       }
     },
     {
@@ -139,19 +134,17 @@
       }
     },
     {
-      "name": "assigned_judge_id",
-      "generator": "fk",
-      "params": {
-        "table": "judges",
-        "column": "judge_id"
-      }
-    },
-    {
       "name": "referred_magistrate_id",
       "generator": "fk",
       "params": {
         "table": "judges",
-        "column": "judge_id"
+        "column": "judge_id",
+        "where": {
+          "bench": "Magistrate"
+        },
+        "match": {
+          "court": "court"
+        }
       }
     },
     {
@@ -289,7 +282,7 @@
   "tables": [
     {
       "name": "judges",
-      "rows": 40,
+      "rows": 60,
       "columns": [
         {
           "name": "judge_id",
@@ -301,6 +294,30 @@
         {
           "name": "judge_name",
           "generator": "full_name"
+        },
+        {
+          "name": "court",
+          "generator": "choice_weighted",
+          "params": {
+            "values": [
+              "Northern District",
+              "Southern District",
+              "Eastern District",
+              "Western District",
+              "Central District",
+              "Metro Division",
+              "Coastal Division"
+            ],
+            "weights": [
+              0.14,
+              0.16,
+              0.12,
+              0.2,
+              0.13,
+              0.15,
+              0.1
+            ]
+          }
         },
         {
           "name": "title",
@@ -318,6 +335,13 @@
               0.05,
               0.25
             ]
+          }
+        },
+        {
+          "name": "bench",
+          "generator": "derived",
+          "params": {
+            "expr": "'Magistrate' if title == 'Magistrate Judge' else 'District'"
           }
         },
         {
@@ -492,7 +516,9 @@
           "generator": "date_between",
           "params": {
             "start": "2019-01-02",
-            "end": "2026-09-30"
+            "end": "2026-09-30",
+            "after": "case_id.date_filed",
+            "before": "case_id.date_terminated"
           }
         }
       ]
@@ -564,15 +590,25 @@
           }
         },
         {
+          "name": "case_type",
+          "generator": "parent",
+          "params": {
+            "via": "case_id",
+            "column": "case_type"
+          }
+        },
+        {
           "name": "filed_at",
           "generator": "timestamp_between",
           "params": {
             "start": "2019-01-02T08:00:00",
-            "end": "2026-09-30T23:59:59"
+            "end": "2026-09-30T23:59:59",
+            "after": "case_id.date_filed",
+            "before": "case_id.date_terminated"
           }
         },
         {
-          "name": "document_type",
+          "name": "document_type_candidate",
           "generator": "choice_weighted",
           "params": {
             "values": [
@@ -616,7 +652,7 @@
           }
         },
         {
-          "name": "filed_by",
+          "name": "filed_by_candidate",
           "generator": "choice_weighted",
           "params": {
             "values": [
@@ -633,6 +669,20 @@
               0.1,
               0.08
             ]
+          }
+        },
+        {
+          "name": "document_type",
+          "generator": "derived",
+          "params": {
+            "expr": "document_type_candidate if case_type == 'CR' or (document_type_candidate != 'Indictment' and document_type_candidate != 'Plea Agreement' and document_type_candidate != 'Sentencing Memorandum') else 'Order'"
+          }
+        },
+        {
+          "name": "filed_by",
+          "generator": "derived",
+          "params": {
+            "expr": "filed_by_candidate if case_type == 'CR' or filed_by_candidate != 'Government' else 'Plaintiff'"
           }
         },
         {
@@ -679,10 +729,10 @@
         },
         {
           "name": "judge_id",
-          "generator": "fk",
+          "generator": "parent",
           "params": {
-            "table": "judges",
-            "column": "judge_id"
+            "via": "case_id",
+            "column": "assigned_judge_id"
           }
         },
         {
@@ -716,7 +766,9 @@
           "generator": "timestamp_between",
           "params": {
             "start": "2019-02-01T09:00:00",
-            "end": "2026-12-31T16:30:00"
+            "end": "2026-12-31T16:30:00",
+            "after": "case_id.date_filed",
+            "before": "case_id.date_terminated"
           }
         },
         {
@@ -736,21 +788,26 @@
           }
         },
         {
-          "name": "outcome",
+          "name": "outcome_candidate",
           "generator": "choice_weighted",
           "params": {
             "values": [
               "Held",
               "Continued",
-              "Vacated",
-              "Scheduled"
+              "Vacated"
             ],
             "weights": [
-              0.6,
-              0.15,
-              0.1,
-              0.15
+              0.7,
+              0.18,
+              0.12
             ]
+          }
+        },
+        {
+          "name": "outcome",
+          "generator": "derived",
+          "params": {
+            "expr": "'Scheduled' if scheduled_at > '2026-09-30T23:59:59' else outcome_candidate"
           }
         }
       ]
@@ -806,7 +863,9 @@
           "generator": "timestamp_between",
           "params": {
             "start": "2019-01-02T00:00:00",
-            "end": "2026-09-30T23:59:59"
+            "end": "2026-09-30T23:59:59",
+            "after": "case_id.date_filed",
+            "before": "case_id.date_terminated"
           }
         },
         {

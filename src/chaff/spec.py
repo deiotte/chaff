@@ -380,6 +380,71 @@ class DatasetSpec(BaseModel):
             check(t.columns, f"table '{t.name}'")
         return self
 
+    @model_validator(mode="after")
+    def _validate_parent_links(self) -> "DatasetSpec":
+        """Fail early on a broken correlated-FK reference (ADR-0043): a
+        `parent` column whose `via` isn't an fk declared before it, or names a
+        column its parent table doesn't have; an fk `where`/`match` naming a
+        parent column that doesn't exist, or a `match` on a cell not yet
+        generated; a date `after`/`before` pointing at a later column."""
+        tables = {self.name: self.columns}
+        for t in self.tables or []:
+            tables[t.name] = t.columns
+        names = {t: {c.name for c in cols} for t, cols in tables.items()}
+
+        def parent_cols(where: str, c: ColumnSpec, table: Any) -> set[str]:
+            if table not in names:
+                raise ValueError(f"{where} column '{c.name}': fk table '{table}' doesn't exist")
+            return names[table]
+
+        for tname, cols in tables.items():
+            where = "dataset" if tname == self.name else f"table '{tname}'"
+            declared: set[str] = set()
+            fks: dict[str, Any] = {}  # fk column -> parent table name
+            for c in cols:
+                p = c.params
+                if c.generator == "fk" and (p.get("where") or p.get("match")):
+                    known = parent_cols(where, c, p.get("table"))
+                    for k in list(p.get("where") or {}) + list(p.get("match") or {}):
+                        if k not in known:
+                            raise ValueError(
+                                f"{where} column '{c.name}': fk filter names '{k}', "
+                                f"which table '{p.get('table')}' doesn't have")
+                    for k, v in (p.get("where") or {}).items():
+                        if not isinstance(v, (str, int, float, bool)) and v is not None:
+                            raise ValueError(
+                                f"{where} column '{c.name}': fk where '{k}' must be a single "
+                                f"value (text, number, true/false or null), not {v!r}")
+                    for k, own in (p.get("match") or {}).items():
+                        if own not in declared:
+                            raise ValueError(
+                                f"{where} column '{c.name}': match '{k}' reads '{own}', "
+                                "which must be a column declared before it")
+                if c.generator == "parent":
+                    via, col = p.get("via"), p.get("column")
+                    if via not in fks:
+                        raise ValueError(
+                            f"{where} column '{c.name}': parent 'via' must name an fk "
+                            f"column declared before it, not {via!r}")
+                    if col not in names[fks[via]]:
+                        raise ValueError(
+                            f"{where} column '{c.name}': table '{fks[via]}' has no column {col!r}")
+                if c.generator in ("date_between", "timestamp_between"):
+                    for key in ("after", "before"):
+                        ref = p.get(key)
+                        if ref is None or ref in declared:
+                            continue
+                        via, dot, col = str(ref).partition(".")
+                        if not (dot and via in fks and col in names[fks[via]]):
+                            raise ValueError(
+                                f"{where} column '{c.name}': '{key}' references {ref!r}, "
+                                "which must be a column declared before it, or "
+                                "'<fk column>.<parent column>'")
+                if c.generator == "fk":
+                    fks[c.name] = p.get("table")
+                declared.add(c.name)
+        return self
+
 
 def load_spec(data: dict[str, Any] | str) -> DatasetSpec:
     """Parse and validate a spec from a dict or JSON string."""

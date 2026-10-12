@@ -22,7 +22,7 @@ def test_examples_are_json_object_shaped():
 
 # `fk` only resolves inside a multi-table spec (it draws from a parent table),
 # so it can't be exercised as a lone single-table column here.
-_NEEDS_MULTITABLE = {"fk"}
+_NEEDS_MULTITABLE = {"fk", "parent"}
 
 
 def test_every_example_actually_generates():
