@@ -24,9 +24,10 @@
   textarea { resize:vertical; min-height:36px; font-family:ui-monospace,Menlo,monospace; font-size:13px; }
   .row3 { display:grid; grid-template-columns:2fr 1fr 1fr; gap:12px; }
   .cols-head, .col { display:grid; gap:10px;
-         grid-template-columns:1.4fr 1.4fr 2fr .8fr 32px; align-items:end; }
+         grid-template-columns:1.4fr 1.4fr 2fr .8fr 52px 32px; align-items:end; }
   .cols-head { margin-bottom:6px; }
   .cols-head span { font-size:12px; color:var(--muted); }
+  .col .c-hidden { width:18px; height:18px; padding:0; justify-self:center; margin-bottom:10px; }
   .col { margin-bottom:10px; }
   .fxpanel { grid-column:1 / -1; margin-top:6px; padding:9px 11px; background:#f5faf7;
              border:1px solid var(--line); border-radius:7px; }
@@ -204,7 +205,7 @@
   <section class="card">
     <h2>Columns</h2>
     <div class="cols-head">
-      <span>Name</span><span>Generator</span><span>Params (JSON, optional)</span><span>Null rate</span><span></span>
+      <span>Name</span><span>Generator</span><span>Params (JSON, optional)</span><span>Null rate</span><span title="Generated so other columns can use it, but left out of the output">Hidden</span><span></span>
     </div>
     <div id="cols"></div>
     <button class="btn ghost mini" id="addCol" style="margin-top:6px;padding:8px 14px">+ Add column</button>
@@ -508,7 +509,7 @@ function updateColMode(colDiv, sel, par) {
 }
 
 function addColumn(name = '', generator = '', params = null, nullRate = 0,
-                   container = $('cols')) {
+                   container = $('cols'), hidden = false) {
   const div = document.createElement('div');
   div.className = 'col';
   div.innerHTML =
@@ -516,12 +517,14 @@ function addColumn(name = '', generator = '', params = null, nullRate = 0,
      <select class="c-gen">${generatorOptions(generator)}</select>
      <textarea class="c-params" rows="1"></textarea>
      <input class="c-null" type="number" min="0" max="1" step="0.05">
+     <input class="c-hidden" type="checkbox" title="Hidden: generated so other columns can use it, but left out of the output">
      <button class="x" title="remove">×</button>`;
   div.querySelector('.c-name').value = name;
   const sel = div.querySelector('.c-gen');
   const par = div.querySelector('.c-params');
   par.value = paramsToText(sel.value, params);
   div.querySelector('.c-null').value = nullRate || 0;
+  div.querySelector('.c-hidden').checked = !!hidden;
   div.querySelector('.x').onclick = () => div.remove();
   sel.onchange = () => updateColMode(div, sel, par);
   container.appendChild(div);
@@ -548,7 +551,7 @@ function loadSpecIntoForm(spec) {
   $('seed').value = (spec.seed ?? '') === null ? '' : (spec.seed ?? '');
   if (spec.output && spec.output.format) $('format').value = spec.output.format;
   $('cols').innerHTML = '';
-  (spec.columns || []).forEach(c => addColumn(c.name, c.generator, c.params, c.null_rate));
+  (spec.columns || []).forEach(c => addColumn(c.name, c.generator, c.params, c.null_rate, $('cols'), c.hidden));
   advanced = { entity: spec.entity || null, tables: spec.tables || null };
   loaded = { description: spec.description ?? null, output: spec.output || null };
   renderAdvancedUI();
@@ -662,7 +665,7 @@ function addTableCard(table) {
        <div></div>
      </div>
      <div class="cols-head" style="margin-top:12px">
-       <span>Name</span><span>Generator</span><span>Params (JSON, optional)</span><span>Null rate</span><span></span>
+       <span>Name</span><span>Generator</span><span>Params (JSON, optional)</span><span>Null rate</span><span title="Generated so other columns can use it, but left out of the output">Hidden</span><span></span>
      </div>
      <div class="t-cols"></div>
      <button class="btn ghost mini t-addcol" style="margin-top:6px;padding:7px 13px">+ Add column</button>
@@ -676,7 +679,7 @@ function addTableCard(table) {
   div.querySelector('.t-addcol').onclick = () => addColumn('', '', null, 0, cols);
   el.appendChild(div);
   // Append columns after the card is in the DOM so columnsBefore() can walk it.
-  (table.columns || []).forEach(c => addColumn(c.name, c.generator, c.params, c.null_rate, cols));
+  (table.columns || []).forEach(c => addColumn(c.name, c.generator, c.params, c.null_rate, cols, c.hidden));
   if (!(table.columns || []).length) addColumn('', '', null, 0, cols);
   return div;
 }
@@ -774,7 +777,9 @@ function buildColumns(container = $('cols')) {
       }
     }
     const null_rate = parseFloat(c.querySelector('.c-null').value) || 0;
-    return { name, generator, params, null_rate };
+    const col = { name, generator, params, null_rate };
+    if (c.querySelector('.c-hidden').checked) col.hidden = true;  // ADR-0044
+    return col;
   }).filter(c => c.name);
 }
 

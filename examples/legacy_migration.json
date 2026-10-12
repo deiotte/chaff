@@ -1,0 +1,678 @@
+{
+  "name": "legacy_cases",
+  "description": "PRESET: Legacy case-system migration pack — a mainframe-style fixed-width extract with seeded, documented defects, plus answer keys saying what every row should become. Defects: mixed date formats (MM/DD/YY, YYYYMMDD, DD-MON-YYYY) with two-digit years across 2000 and 00000000 for null; old-style case numbers to re-key; duplicate keys; retired status codes; free text where nature-of-suit codes belong; names in ALL CAPS, with trailing spaces, typos, mojibake (José -> JosÃ©) and truncation; docket entries pointing at cases that don't exist. Writes one file per table; run with --format csv for CSVs.",
+  "seed": 2000,
+  "rows": 2000,
+  "columns": [
+    {
+      "name": "case_id",
+      "generator": "row_id",
+      "params": {
+        "start": 1
+      },
+      "hidden": true
+    },
+    {
+      "name": "office",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 4
+      },
+      "hidden": true
+    },
+    {
+      "name": "case_type",
+      "generator": "choice_weighted",
+      "params": {
+        "values": [
+          "CV",
+          "CR",
+          "MC"
+        ],
+        "weights": [
+          0.65,
+          0.28,
+          0.07
+        ]
+      },
+      "hidden": true
+    },
+    {
+      "name": "year",
+      "generator": "int_range",
+      "params": {
+        "min": 1988,
+        "max": 2012
+      },
+      "hidden": true
+    },
+    {
+      "name": "month",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 12
+      },
+      "hidden": true
+    },
+    {
+      "name": "day",
+      "generator": "int_range",
+      "params": {
+        "min": 1,
+        "max": 28
+      },
+      "hidden": true
+    },
+    {
+      "name": "filed_clean",
+      "generator": "derived",
+      "null_rate": 0.02,
+      "hidden": true,
+      "params": {
+        "expr": "str(year) + '-' + ('0' if month < 10 else '') + str(month) + '-' + ('0' if day < 10 else '') + str(day)"
+      }
+    },
+    {
+      "name": "seq",
+      "generator": "derived",
+      "params": {
+        "expr": "str(10000 + case_id)"
+      },
+      "hidden": true
+    },
+    {
+      "name": "dup_roll",
+      "generator": "bool_rate",
+      "params": {
+        "true_rate": 0.02
+      },
+      "hidden": true
+    },
+    {
+      "name": "dup_key",
+      "generator": "choice",
+      "params": {
+        "values": [
+          "CV-1999-00001",
+          "CV-1999-00002",
+          "CV-1999-00003",
+          "CV-1999-00004"
+        ]
+      },
+      "hidden": true
+    },
+    {
+      "name": "seq_used",
+      "generator": "derived",
+      "params": {
+        "expr": "case_type + '-' + str(year) + '-' + seq"
+      },
+      "hidden": true
+    },
+    {
+      "name": "expected_case_number",
+      "generator": "derived",
+      "params": {
+        "expr": "str(office) + '-' + ('0' if year % 100 < 10 else '') + str(year % 100) + '-' + case_type + '-' + seq"
+      },
+      "hidden": true
+    },
+    {
+      "name": "CASE_NO",
+      "generator": "derived",
+      "params": {
+        "expr": "dup_key if dup_roll else seq_used"
+      }
+    },
+    {
+      "name": "FILED_DT",
+      "generator": "legacy_date",
+      "params": {
+        "source": "filed_clean",
+        "formats": [
+          "%m/%d/%y",
+          "%Y%m%d",
+          "%d-%b-%Y"
+        ],
+        "weights": [
+          0.6,
+          0.3,
+          0.1
+        ],
+        "null_token": "00000000"
+      }
+    },
+    {
+      "name": "status",
+      "generator": "choice_weighted",
+      "params": {
+        "values": [
+          "Open",
+          "Closed",
+          "Pending",
+          "Dismissed"
+        ],
+        "weights": [
+          0.15,
+          0.6,
+          0.1,
+          0.15
+        ]
+      },
+      "hidden": true
+    },
+    {
+      "name": "retired_roll",
+      "generator": "bool_rate",
+      "params": {
+        "true_rate": 0.03
+      },
+      "hidden": true
+    },
+    {
+      "name": "retired_code",
+      "generator": "choice",
+      "params": {
+        "values": [
+          "X9",
+          "Z",
+          "99"
+        ]
+      },
+      "hidden": true
+    },
+    {
+      "name": "STAT_CD",
+      "generator": "derived",
+      "params": {
+        "expr": "retired_code if retired_roll else ('O' if status == 'Open' else ('C' if status == 'Closed' else ('P' if status == 'Pending' else 'D')))"
+      }
+    },
+    {
+      "name": "nos_code",
+      "generator": "choice_weighted",
+      "params": {
+        "values": [
+          "190",
+          "360",
+          "440",
+          "442",
+          "530",
+          "550"
+        ],
+        "weights": [
+          0.25,
+          0.2,
+          0.2,
+          0.15,
+          0.1,
+          0.1
+        ]
+      },
+      "hidden": true
+    },
+    {
+      "name": "freetext_roll",
+      "generator": "bool_rate",
+      "params": {
+        "true_rate": 0.05
+      },
+      "hidden": true
+    },
+    {
+      "name": "nos_text",
+      "generator": "choice",
+      "params": {
+        "values": [
+          "CONTRACT DISPUTE",
+          "civil rights - employment",
+          "Habeas",
+          "PI/auto accident",
+          "see file",
+          "PRISONER PETITION"
+        ]
+      },
+      "hidden": true
+    },
+    {
+      "name": "NOS",
+      "generator": "derived",
+      "params": {
+        "expr": "(nos_text if freetext_roll else nos_code) if case_type == 'CV' else ''"
+      }
+    },
+    {
+      "name": "faker_name",
+      "generator": "full_name",
+      "hidden": true
+    },
+    {
+      "name": "edge_roll",
+      "generator": "bool_rate",
+      "params": {
+        "true_rate": 0.08
+      },
+      "hidden": true
+    },
+    {
+      "name": "edge_name",
+      "generator": "choice",
+      "params": {
+        "values": [
+          "José Álvarez",
+          "Nguyễn Văn An",
+          "Zoë O'Brien-Müller",
+          "François Lefèvre",
+          "Björn Åström",
+          "Siobhán Ní Bhriain",
+          "Renée St. John-Smythe",
+          "Ma"
+        ]
+      },
+      "hidden": true
+    },
+    {
+      "name": "clean_name",
+      "generator": "derived",
+      "params": {
+        "expr": "edge_name if edge_roll else faker_name"
+      },
+      "hidden": true
+    },
+    {
+      "name": "PARTY_NM",
+      "generator": "dirty",
+      "params": {
+        "source": "clean_name",
+        "rate": 0.3,
+        "kinds": [
+          "upper",
+          "upper",
+          "trailing_space",
+          "typo",
+          "mojibake",
+          "truncate"
+        ],
+        "truncate_to": 12
+      }
+    },
+    {
+      "name": "DEMAND_AMT",
+      "generator": "lognormal",
+      "params": {
+        "mu": 10.5,
+        "sigma": 1.3,
+        "precision": 0
+      },
+      "hidden": true
+    },
+    {
+      "name": "DEMAND_CENTS",
+      "generator": "derived",
+      "params": {
+        "expr": "int(DEMAND_AMT * 100)"
+      }
+    }
+  ],
+  "output": {
+    "format": "fixed_width",
+    "options": {
+      "pad": {
+        "DEMAND_CENTS": "0"
+      },
+      "overflow": "error"
+    }
+  },
+  "sink": {
+    "sink": "file",
+    "options": {
+      "path": "out/legacy_migration.txt"
+    }
+  },
+  "tables": [
+    {
+      "name": "legacy_docket",
+      "rows": 6000,
+      "columns": [
+        {
+          "name": "entry_id",
+          "generator": "row_id",
+          "params": {
+            "start": 1
+          },
+          "hidden": true
+        },
+        {
+          "name": "case_ref",
+          "generator": "fk",
+          "params": {
+            "table": "legacy_cases",
+            "column": "case_id"
+          },
+          "hidden": true
+        },
+        {
+          "name": "parent_case_no",
+          "generator": "parent",
+          "params": {
+            "via": "case_ref",
+            "column": "CASE_NO"
+          },
+          "hidden": true
+        },
+        {
+          "name": "orphan_roll",
+          "generator": "bool_rate",
+          "params": {
+            "true_rate": 0.02
+          },
+          "hidden": true
+        },
+        {
+          "name": "orphan_seq",
+          "generator": "pattern",
+          "params": {
+            "pattern": "9####"
+          },
+          "hidden": true
+        },
+        {
+          "name": "CASE_NO",
+          "generator": "derived",
+          "params": {
+            "expr": "'CV-1900-' + orphan_seq if orphan_roll else parent_case_no"
+          }
+        },
+        {
+          "name": "ENTRY_NO",
+          "generator": "derived",
+          "params": {
+            "expr": "entry_id"
+          }
+        },
+        {
+          "name": "entry_clean",
+          "generator": "date_between",
+          "hidden": true,
+          "params": {
+            "start": "1988-01-01",
+            "end": "2015-12-31",
+            "after": "case_ref.filed_clean"
+          }
+        },
+        {
+          "name": "ENTRY_DT",
+          "generator": "legacy_date",
+          "params": {
+            "source": "entry_clean",
+            "formats": [
+              "%m/%d/%y",
+              "%Y%m%d"
+            ],
+            "weights": [
+              0.7,
+              0.3
+            ]
+          }
+        },
+        {
+          "name": "doc_type",
+          "generator": "choice_weighted",
+          "params": {
+            "values": [
+              "Complaint",
+              "Answer",
+              "Motion to Dismiss",
+              "Order",
+              "Minute Entry",
+              "Judgment",
+              "Notice of Appeal"
+            ],
+            "weights": [
+              0.1,
+              0.1,
+              0.12,
+              0.3,
+              0.25,
+              0.08,
+              0.05
+            ]
+          },
+          "hidden": true
+        },
+        {
+          "name": "DOC_DESC",
+          "generator": "dirty",
+          "params": {
+            "source": "doc_type",
+            "rate": 0.35,
+            "kinds": [
+              "upper",
+              "upper",
+              "trailing_space",
+              "truncate"
+            ],
+            "truncate_to": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "answer_key_cases",
+      "rows": 2000,
+      "columns": [
+        {
+          "name": "src",
+          "generator": "fk",
+          "params": {
+            "table": "legacy_cases",
+            "column": "case_id",
+            "each": true
+          },
+          "hidden": true
+        },
+        {
+          "name": "legacy_case_no",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "CASE_NO"
+          }
+        },
+        {
+          "name": "expected_case_number",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "expected_case_number"
+          }
+        },
+        {
+          "name": "expected_filed_date",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "filed_clean"
+          }
+        },
+        {
+          "name": "expected_status",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "status"
+          }
+        },
+        {
+          "name": "p_type",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "case_type"
+          },
+          "hidden": true
+        },
+        {
+          "name": "p_nos",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "nos_code"
+          },
+          "hidden": true
+        },
+        {
+          "name": "expected_nos",
+          "generator": "derived",
+          "params": {
+            "expr": "p_nos if p_type == 'CV' else ''"
+          }
+        },
+        {
+          "name": "expected_party_name",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "clean_name"
+          }
+        },
+        {
+          "name": "p_party",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "PARTY_NM"
+          },
+          "hidden": true
+        },
+        {
+          "name": "is_duplicate_key",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "dup_roll"
+          }
+        },
+        {
+          "name": "p_filed_dt",
+          "generator": "parent",
+          "hidden": true,
+          "params": {
+            "via": "src",
+            "column": "FILED_DT"
+          }
+        },
+        {
+          "name": "has_null_date",
+          "generator": "derived",
+          "params": {
+            "expr": "p_filed_dt == '00000000'"
+          }
+        },
+        {
+          "name": "has_retired_status",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "retired_roll"
+          }
+        },
+        {
+          "name": "p_free",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "freetext_roll"
+          },
+          "hidden": true
+        },
+        {
+          "name": "has_free_text_nos",
+          "generator": "derived",
+          "params": {
+            "expr": "p_free and p_type == 'CV'"
+          }
+        },
+        {
+          "name": "name_damaged",
+          "generator": "derived",
+          "params": {
+            "expr": "p_party != expected_party_name"
+          }
+        },
+        {
+          "name": "expected_action",
+          "generator": "derived",
+          "params": {
+            "expr": "'quarantine' if is_duplicate_key or has_null_date else ('map_code' if has_retired_status or has_free_text_nos else ('clean_text' if name_damaged else 'load'))"
+          }
+        }
+      ]
+    },
+    {
+      "name": "answer_key_docket",
+      "rows": 6000,
+      "columns": [
+        {
+          "name": "src",
+          "generator": "fk",
+          "params": {
+            "table": "legacy_docket",
+            "column": "entry_id",
+            "each": true
+          },
+          "hidden": true
+        },
+        {
+          "name": "legacy_entry_no",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "ENTRY_NO"
+          }
+        },
+        {
+          "name": "legacy_case_no",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "CASE_NO"
+          }
+        },
+        {
+          "name": "expected_entry_date",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "entry_clean"
+          }
+        },
+        {
+          "name": "expected_description",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "doc_type"
+          }
+        },
+        {
+          "name": "is_orphan",
+          "generator": "parent",
+          "params": {
+            "via": "src",
+            "column": "orphan_roll"
+          }
+        },
+        {
+          "name": "expected_action",
+          "generator": "derived",
+          "params": {
+            "expr": "'reject' if is_orphan else 'load'"
+          }
+        }
+      ]
+    }
+  ]
+}

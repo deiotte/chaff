@@ -598,7 +598,18 @@ Tracking epic: #92. Redaction test documents are out of scope; they live in
 - [ ] Hostile and malformed uploads preset (#83)
 - [ ] `.ics` hearing calendar encoder (#84)
 - [ ] LegalXML ECF / NIEM records exchange (#85)
-- [ ] Legacy migration pack: fixed-width plus dirty data (#86)
+- [x] **Legacy migration pack (#86, ADR-0044).** Hidden columns (generated,
+      readable, never emitted — every exit covered, UI checkbox included);
+      `fk` `each` for 1:1 answer keys; `dirty` and `legacy_date` generators;
+      `fixed_width` format plus a `fixed_width_layout` copybook; CLI
+      `--format`. `legacy_migration` preset: fixed-width case extract and
+      docket with mixed/two-digit/null dates, old case numbers to re-key,
+      duplicate keys, retired status codes, free-text codes, damaged and
+      mojibake names, orphaned docket entries, and answer keys whose every
+      flag is tested against the dirty data. Fixed the `/stream` socket
+      encoding with the raw spec (entity id/tick were missing from CSV there).
+      **Not built:** mixed encodings inside one file; EBCDIC/COMP-3; a
+      separate reconciliation summary file (it's a GROUP BY over the key).
 - [ ] Users, roles and sealed-case access (#87)
 - [ ] Case lifecycle plus audit event stream (#88)
 - [ ] Phone and portal intake (#89)

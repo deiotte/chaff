@@ -74,6 +74,10 @@ class ColumnSpec(BaseModel):
     generator: str = Field(..., description="Registered generator id, e.g. 'full_name', 'choice_weighted'.")
     params: dict[str, Any] = Field(default_factory=dict, description="Generator-specific parameters.")
     null_rate: float = Field(0.0, ge=0.0, le=1.0, description="Probability [0,1] a value is null/empty.")
+    hidden: bool = Field(False, description=(
+        "Generate this column but leave it out of the output. Later columns, "
+        "`derived` formulas and child tables' `parent` columns can still read "
+        "it (ADR-0044) — e.g. the clean value a dirty column is made from."))
 
     @field_validator("name")
     @classmethod
@@ -440,6 +444,14 @@ class DatasetSpec(BaseModel):
                                 f"{where} column '{c.name}': '{key}' references {ref!r}, "
                                 "which must be a column declared before it, or "
                                 "'<fk column>.<parent column>'")
+                if c.generator == "fk" and p.get("each") and (p.get("where") or p.get("match")):
+                    raise ValueError(
+                        f"{where} column '{c.name}': fk 'each' walks every parent in order, "
+                        "so it can't also filter with 'where' or 'match'")
+                if c.generator in ("dirty", "legacy_date") and p.get("source") not in declared:
+                    raise ValueError(
+                        f"{where} column '{c.name}': '{c.generator}' needs 'source' naming a "
+                        f"column declared before it, not {p.get('source')!r}")
                 if c.generator == "fk":
                     fks[c.name] = p.get("table")
                 declared.add(c.name)
