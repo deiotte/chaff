@@ -271,6 +271,10 @@ def to_xml(spec: DatasetSpec, rows: list[dict]) -> bytes:
 from . import cot, klv, st0601  # noqa: E402,F401
 
 
+# ── Legacy extracts (stdlib, core; ADR-0044) ─────────────────────────
+from . import fixed_width  # noqa: E402,F401
+
+
 # ── Heavy formats (optional deps under the `formats-extra` extra) ─────
 # Imported for their registration side-effect. Each module registers its
 # encoder at import time WITHOUT importing its heavy dep (that import is

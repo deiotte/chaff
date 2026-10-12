@@ -85,6 +85,7 @@ chaff registry
 chaff validate examples/retail_orders.json
 chaff generate examples/retail_orders.json
 chaff generate examples/crm_contacts.json --seed 7 --rows 50 --out out/small.csv
+chaff generate examples/legacy_migration.json --format csv   # same spec, CSV instead of fixed width
 
 uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
@@ -158,7 +159,7 @@ change `output.format` for a different encoding.
 
 ## What is implemented
 
-- **55 semantic generators** for people, geography, identifiers, dates,
+- **57 semantic generators** for people, geography, identifiers, dates,
   telemetry, finance-shaped test values, text, and distributions. Registry
   examples supply parameter shapes to the UI; `chaff registry` lists the IDs.
 - **Related tables:** `tables` plus `fk` columns generate in dependency order.
@@ -171,6 +172,15 @@ change `output.format` for a different encoding.
   copies a cell from the row an `fk` picked, `fk` takes `where`/`match`
   filters (a magistrate from the same court), and date generators take
   `after`/`before` bounds such as `"case_id.date_filed"` (ADR-0043).
+- **Hidden columns:** `"hidden": true` generates a column other columns can
+  read but leaves it out of every output (ADR-0044). That's how dirty data
+  gets an answer key without the answers leaking into the dirty file.
+- **Legacy migration test data:** `dirty` damages a copied value (ALL CAPS,
+  stray spaces, typos, mojibake, truncation), `legacy_date` writes dates the
+  way old systems did (`MM/DD/YY`, `YYYYMMDD`, `00000000` for null), and
+  `fk` `{"each": true}` lines an answer key up 1:1 with what it scores. See
+  [legacy_migration](examples/legacy_migration.json): a fixed-width case
+  extract and docket with seeded defects, plus answer keys for every row.
 - **Stateful entities:** `entity.count × entity.ticks` snapshots, including
   engine-supplied ID and tick columns. `movement`, `lifecycle`, and `drift`
   update state. See [moving_tracks](examples/moving_tracks.json) and
@@ -187,7 +197,7 @@ change `output.format` for a different encoding.
   format. A separate truth file records identity and position for scoring. See
   [correlated_scene](examples/correlated_scene.json) and
   [correlated_multikind](examples/correlated_multikind.json).
-- **Reusable specs:** 21 shipped presets, saved schemas, previews, downloads,
+- **Reusable specs:** 22 shipped presets, saved schemas, previews, downloads,
   and whole-spec round trips through the browser editors.
 
 ### File formats and streaming compatibility
@@ -199,7 +209,7 @@ record at a time:
 |---|---|---|---|
 | CSV, JSON, NDJSON, CoT | Yes | Yes | None for encoding |
 | VMTI KLV (`klv`, `klv0601`) | Yes | Yes, one target per packet | None for encoding |
-| TSV, SQL, XML | Yes | Not implemented | None |
+| TSV, SQL, XML, fixed width (`fixed_width`, plus a `fixed_width_layout` copybook) | Yes | Not implemented | None |
 | XLSX, Parquet, Avro | Yes | Not implemented | `formats-extra` |
 
 The six sinks are `file`, `http`, `kafka`, `mqtt`, `tcp`, and `udp`. HTTP,

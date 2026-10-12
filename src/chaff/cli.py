@@ -24,6 +24,9 @@ def generate(
     out: Optional[Path] = typer.Option(None, "--out", "-o", help="Override sink file path."),
     seed: Optional[int] = typer.Option(None, "--seed", help="Override spec seed."),
     rows: Optional[int] = typer.Option(None, "--rows", "-n", help="Override row count."),
+    fmt: Optional[str] = typer.Option(
+        None, "--format", "-f",
+        help="Override output format (e.g. csv), keeping the spec's other output options."),
 ):
     """Generate a dataset from a spec file."""
     data = json.loads(spec_file.read_text())
@@ -31,6 +34,8 @@ def generate(
         data["seed"] = seed
     if rows is not None:
         data["rows"] = rows
+    if fmt is not None:
+        data.setdefault("output", {})["format"] = fmt
     if out is not None:
         data.setdefault("sink", {}).setdefault("options", {})["path"] = str(out)
     spec = load_spec(data)

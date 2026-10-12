@@ -527,6 +527,9 @@ async def _serve_stream(websocket: WebSocket) -> None:
         await websocket.send_json({"error": str(e)})
         await websocket.close()
         return
+    # The encode view, not the raw spec: it drops hidden columns (ADR-0044)
+    # and adds an entity's id/tick, as every other encode path does.
+    view = encode_view(spec)
 
     try:
         rate, duration, max_records = _parse_stream_params(websocket.query_params)
@@ -553,7 +556,7 @@ async def _serve_stream(websocket: WebSocket) -> None:
                 await asyncio.sleep(interval)  # async pacing: never blocks the loop
             # Per-record encoders append a trailing newline (ndjson/csv line);
             # one clean record per frame reads better over a socket.
-            await websocket.send_text(rec_enc(spec, row).decode("utf-8").rstrip("\n"))
+            await websocket.send_text(rec_enc(view, row).decode("utf-8").rstrip("\n"))
             sent += 1
     except WebSocketDisconnect:
         return  # client hung up mid-stream — stop generating, we're done

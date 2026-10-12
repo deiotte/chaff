@@ -83,6 +83,7 @@ _GROUP_ORDER: list[tuple[str, list[str]]] = [
                        "user_agent", "http_method", "http_status", "port"]),
     ("Finance", ["currency_code", "credit_card", "iban"]),
     ("Relationships", ["fk", "parent"]),
+    ("Legacy data", ["dirty", "legacy_date"]),
     ("Computed", ["derived"]),
 ]
 
@@ -251,6 +252,9 @@ def fk(ctx: GenContext, p: dict) -> Any:
       match: {"court": "court"}             parent cell equals this row's cell
     No qualifying parent → None (e.g. no magistrate in that court).
 
+    {"each": true} instead walks the parent in order, one child row per
+    parent row (ADR-0044) — for answer keys that must line up 1:1.
+
     The chosen parent row is kept in ctx.cache under this column's name, so
     `parent` columns can copy its other cells. Reading it costs no entropy.
 
@@ -262,6 +266,14 @@ def fk(ctx: GenContext, p: dict) -> Any:
     parent = ctx.tables[table]
     if not parent:
         raise ValueError(f"fk parent table '{table}' produced no rows")
+    if p.get("each"):
+        # One child per parent, in order (ADR-0044): row i points at parent
+        # row i, so an answer-key table lines up 1:1 with the rows it scores.
+        # No rng draw; rows past the parent's count get None.
+        chosen = parent[ctx.row_index] if ctx.row_index < len(parent) else None
+        if ctx.cache is not None and ctx.column is not None:
+            ctx.cache[ctx.column] = chosen
+        return None if chosen is None else chosen[column]
     where, match = p.get("where"), p.get("match")
     if where or match:
         parent = _filtered_parents(ctx, table, parent, where or {}, match or {})
@@ -304,6 +316,87 @@ def parent(ctx: GenContext, p: dict) -> Any:
     """
     chosen = (ctx.cache or {}).get(p["via"])
     return None if chosen is None else chosen.get(p["column"])
+
+
+# ── Legacy dirt (ADR-0044) ───────────────────────────────────────────
+# Data shaped like an old system's: the clean value is generated (usually in a
+# hidden column) and these re-emit it the way a legacy extract would. All
+# draws come from ctx.rng, so the same seed dirties the same rows.
+
+_DIRT_KINDS = ("upper", "trailing_space", "leading_space", "typo", "truncate",
+               "mojibake", "blank")
+
+
+def _mojibake(text: str) -> str:
+    """UTF-8 bytes misread as Windows-1252: "José" -> "JosÃ©". The classic
+    scar of a legacy system that transcoded twice. Pure ASCII is unchanged."""
+    return text.encode("utf-8").decode("cp1252", errors="replace")
+
+
+@generator("dirty", example={"source": "name", "rate": 0.2,
+                             "kinds": ["upper", "trailing_space", "typo"]})
+def dirty(ctx: GenContext, p: dict) -> Any:
+    """Copy an earlier column, damaging it at `rate` the way legacy data is
+    damaged. params: source (column to copy), rate (0-1, default 0.15), kinds
+    (subset of upper, trailing_space, leading_space, typo, truncate, mojibake,
+    blank; default all), truncate_to (default 10).
+
+    Example: {"source": "name", "rate": 0.2, "kinds": ["upper", "typo"]}
+    Pair with a `derived` "was it damaged" flag in an answer key by comparing
+    the two columns.
+    """
+    value = (ctx.row or {}).get(p["source"])
+    if value is None or ctx.rng.random() >= float(p.get("rate", 0.15)):
+        return value
+    kinds = list(p.get("kinds") or _DIRT_KINDS)
+    kind = ctx.rng.choice(kinds)
+    text = str(value)
+    if kind == "upper":
+        return text.upper()
+    if kind == "trailing_space":
+        return text + " " * ctx.rng.randint(1, 4)
+    if kind == "leading_space":
+        return " " * ctx.rng.randint(1, 3) + text
+    if kind == "typo" and len(text) > 1:
+        i = ctx.rng.randrange(len(text) - 1)
+        return text[:i] + text[i + 1] + text[i] + text[i + 2:]
+    if kind == "truncate":
+        return text[: int(p.get("truncate_to", 10))]
+    if kind == "mojibake":
+        return _mojibake(text)
+    if kind == "blank":
+        return ""
+    return text
+
+
+@generator("legacy_date", example={"source": "opened",
+                                   "formats": ["%m/%d/%y", "%Y%m%d"],
+                                   "null_token": "00000000"})
+def legacy_date(ctx: GenContext, p: dict) -> Any:
+    """Re-render an earlier ISO date column in legacy formats, chosen per row.
+    params: source (an ISO date/timestamp column), formats (strftime list,
+    default ["%m/%d/%y", "%Y%m%d", "%d-%b-%Y", "%Y-%m-%d"]), weights
+    (optional, same length), null_token (what a null becomes; default "").
+
+    Two-digit years (%y) are the point: 01/02/99 and 01/02/03 sort wrong and
+    parse ambiguously across the century boundary.
+
+    Example: {"source": "opened", "formats": ["%m/%d/%y", "%Y%m%d"], "null_token": "00000000"}
+    """
+    value = (ctx.row or {}).get(p["source"])
+    if value is None or value == "":
+        return p.get("null_token", "")
+    formats = list(p.get("formats") or ["%m/%d/%y", "%Y%m%d", "%d-%b-%Y", "%Y-%m-%d"])
+    weights = p.get("weights")
+    fmt = ctx.rng.choices(formats, weights=weights)[0] if weights else ctx.rng.choice(formats)
+    when = _parse_dt(str(value))
+    # %b is locale-dependent in strftime; spell it out so output never varies
+    # with the machine's locale (INV-3).
+    fmt = fmt.replace("%b", _MONTHS[when.month - 1])
+    return when.strftime(fmt).upper()
+
+
+_MONTHS = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
 
 
 # ── Numbers ──────────────────────────────────────────────────────────

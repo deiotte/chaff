@@ -23,6 +23,9 @@ def test_examples_are_json_object_shaped():
 # `fk` only resolves inside a multi-table spec (it draws from a parent table),
 # so it can't be exercised as a lone single-table column here.
 _NEEDS_MULTITABLE = {"fk", "parent"}
+# Generators that re-render an earlier column get that column first, named
+# the way their published example expects.
+_NEEDS_SOURCE = {"dirty": ("name", "full_name"), "legacy_date": ("opened", "date_between")}
 
 
 def test_every_example_actually_generates():
@@ -32,9 +35,13 @@ def test_every_example_actually_generates():
     for gen_id, ex in list_generator_examples().items():
         if gen_id in _NEEDS_MULTITABLE:
             continue
+        cols = [{"name": "v", "generator": gen_id, "params": ex}]
+        if gen_id in _NEEDS_SOURCE:
+            src, src_gen = _NEEDS_SOURCE[gen_id]
+            cols.insert(0, {"name": src, "generator": src_gen})
         spec = load_spec({
             "name": "t", "seed": 7, "rows": 5,
-            "columns": [{"name": "v", "generator": gen_id, "params": ex}],
+            "columns": cols,
             "output": {"format": "csv"},
         })
         rows = list(generate_rows(spec))

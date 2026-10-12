@@ -81,10 +81,24 @@ def _generate_table(rng, faker, columns, n_rows, tables=None) -> list[dict[str, 
     return list(_iter_table(rng, faker, columns, n_rows, tables))
 
 
+def _hidden(columns) -> set[str]:
+    return {c.name for c in columns if c.hidden}
+
+
+def _strip(rows, hidden: set[str]):
+    """Rows with hidden columns removed (ADR-0044). Hidden cells exist only
+    while a table generates, so derived/parent columns can read them; nothing
+    the engine hands out carries them. A spec with no hidden columns gets its
+    rows back untouched (same objects, same bytes)."""
+    if not hidden:
+        return rows
+    return ({k: v for k, v in r.items() if k not in hidden} for r in rows)
+
+
 def generate_rows(spec: DatasetSpec) -> list[dict[str, Any]]:
     """Generate all rows for the (primary) table. Deterministic under seed."""
     rng, faker = _seeded(spec)
-    return _generate_table(rng, faker, spec.columns, spec.rows)
+    return list(_strip(_generate_table(rng, faker, spec.columns, spec.rows), _hidden(spec.columns)))
 
 
 def iter_rows(spec: DatasetSpec, *, limit: float | int | None = None) -> Iterator[dict[str, Any]]:
@@ -96,7 +110,7 @@ def iter_rows(spec: DatasetSpec, *, limit: float | int | None = None) -> Iterato
     byte-for-byte and any prefix is a deterministic prefix (INV-3)."""
     rng, faker = _seeded(spec)
     n = spec.rows if limit is None else limit
-    yield from _iter_table(rng, faker, spec.columns, n)
+    yield from _strip(_iter_table(rng, faker, spec.columns, n), _hidden(spec.columns))
 
 
 # ── Multi-table (ADR-0008) ───────────────────────────────────────────
@@ -160,7 +174,8 @@ def generate_tables(spec: DatasetSpec) -> dict[str, list[dict[str, Any]]]:
     result: dict[str, list[dict[str, Any]]] = {}
     for name in _topo_order(all_tables):
         result[name] = _generate_table(rng, faker, cols_by[name], rows_by[name], tables=result)
-    return result
+    # Children have read their parents' hidden cells by now; drop them.
+    return {name: list(_strip(rows, _hidden(cols_by[name]))) for name, rows in result.items()}
 
 
 # ── Stateful entities (ADR-0009) ─────────────────────────────────────
@@ -215,6 +230,7 @@ def iter_entity_rows(spec: DatasetSpec, *, limit: float | int | None = None) -> 
         states.append(state)
 
     cap = ent.count * ent.ticks if limit is None else limit
+    hidden = _hidden(spec.columns)
     emitted = 0
     t = 0
     while emitted < cap:
@@ -228,6 +244,8 @@ def iter_entity_rows(spec: DatasetSpec, *, limit: float | int | None = None) -> 
                 break
             row = {ent.id_column: ids[e], ent.tick_column: t}
             row.update(states[e])  # snapshot of current state
+            for h in hidden:
+                row.pop(h, None)
             yield row
             emitted += 1
         t += 1
@@ -392,14 +410,17 @@ def encode_view(spec: DatasetSpec) -> DatasetSpec:
     quietly producing wrong values. Multi-table specs get their views from
     `table_views`; a plain spec is its own view.
     """
+    visible = [c for c in spec.columns if not c.hidden]  # ADR-0044
     ent = spec.entity
     if ent is None:
-        return spec
+        if len(visible) == len(spec.columns):
+            return spec
+        return spec.model_copy(update={"columns": visible})
     synthesized = [
         ColumnSpec(name=ent.id_column, generator=_ENGINE_SUPPLIED),
         ColumnSpec(name=ent.tick_column, generator=_ENGINE_SUPPLIED),
     ]
-    return spec.model_copy(update={"columns": synthesized + list(spec.columns)})
+    return spec.model_copy(update={"columns": synthesized + visible})
 
 
 # ── Observers: one scene, several accounts of it (ADR-0033) ──────────
@@ -724,7 +745,7 @@ def table_views(spec: DatasetSpec) -> Iterator[tuple[str, DatasetSpec, list[dict
     for tname, rows in tables.items():
         view = spec.model_copy(update={
             "name": tname,
-            "columns": cols_by[tname],
+            "columns": [c for c in cols_by[tname] if not c.hidden],  # ADR-0044
             "tables": None,
         })
         yield tname, view, rows
