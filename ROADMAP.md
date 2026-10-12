@@ -566,6 +566,37 @@ probabilities only where they earn their place (INV-3).
       results; the answer key kept apart from what the receiver gets, and a
       plain-language statement of the intended test.
 
+## Phase 11 — Case management test data  ← IN PROGRESS
+Test data for case management systems across the whole case lifecycle: intake,
+parties, filings, hearings, disposition, retention and legacy migration.
+Tracking epic: #92. Redaction test documents are out of scope; they live in
+`deiotte/rdct`.
+- [x] **`case_management` preset.** 8 FK-linked tables: cases, judges,
+      attorneys, parties, representations, docket entries, hearings, case
+      events. Case numbers (`2-24-CV-01234`) agree with
+      `date_filed`; only Closed cases carry `date_terminated`, never before
+      filing; nature of suit is civil-only; only individuals are pro se.
+      Locked by `tests/test_case_management_preset.py`.
+      **Known gaps:** `fk` copies only the key, so docket entries and
+      hearings can predate their case and a hearing's judge needn't be the
+      case's judge (#77). The preset keeps its helper columns
+      (`nos_candidate`, `filed_month`, ...) because chaff has no hidden
+      columns. Docket text is still lorem (#78).
+- [ ] Correlated FKs: children consistent with parents (#77, ADR first)
+- [ ] Realistic docket text and case notes (#78)
+- [ ] Near-duplicate parties with an answer key (#79)
+- [ ] `.eml` email intake encoder (#80)
+- [ ] Court filing documents, PDF/DOCX, rdct-compatible (#81)
+- [ ] Scanned paper mail, image-only PDF/TIFF (#82)
+- [ ] Hostile and malformed uploads preset (#83)
+- [ ] `.ics` hearing calendar encoder (#84)
+- [ ] LegalXML ECF / NIEM records exchange (#85)
+- [ ] Legacy migration pack: fixed-width plus dirty data (#86)
+- [ ] Users, roles and sealed-case access (#87)
+- [ ] Case lifecycle plus audit event stream (#88)
+- [ ] Phone and portal intake (#89)
+- [ ] Retention, disposition and load presets (#90)
+
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
 - Data anonymization / production-data masking (that's Tonic's lane; chaff
