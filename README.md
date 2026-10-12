@@ -162,7 +162,11 @@ change `output.format` for a different encoding.
   telemetry, finance-shaped test values, text, and distributions. Registry
   examples supply parameter shapes to the UI; `chaff registry` lists the IDs.
 - **Related tables:** `tables` plus `fk` columns generate in dependency order.
-  See [retail_orders](examples/retail_orders.json).
+  See [retail_orders](examples/retail_orders.json), or
+  [case_management](examples/case_management.json) for a court case system:
+  8 linked tables (cases, judges, attorneys, parties, representations, docket
+  entries, hearings, audit events) with case numbers whose year matches the
+  filing date.
 - **Stateful entities:** `entity.count × entity.ticks` snapshots, including
   engine-supplied ID and tick columns. `movement`, `lifecycle`, and `drift`
   update state. See [moving_tracks](examples/moving_tracks.json) and
@@ -179,7 +183,7 @@ change `output.format` for a different encoding.
   format. A separate truth file records identity and position for scoring. See
   [correlated_scene](examples/correlated_scene.json) and
   [correlated_multikind](examples/correlated_multikind.json).
-- **Reusable specs:** 18 shipped presets, saved schemas, previews, downloads,
+- **Reusable specs:** 21 shipped presets, saved schemas, previews, downloads,
   and whole-spec round trips through the browser editors.
 
 ### File formats and streaming compatibility
