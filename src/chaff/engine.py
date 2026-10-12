@@ -56,6 +56,7 @@ def _iter_table(rng, faker, columns, n_rows, tables=None) -> Iterator[dict[str, 
     the lazy streaming iterators, so they can never drift apart. `tables`
     (already generated parents) is threaded to fk generators; None single-table."""
     resolved = [(col, get_generator(col.generator)) for col in columns]
+    memo: dict[Any, Any] = {}  # per-table, outlives a row: filtered-fk indexes (ADR-0043)
     i = 0
     while i < n_rows:
         # `row` is filled in column order; ctx.row is the same dict, so a
@@ -64,7 +65,7 @@ def _iter_table(rng, faker, columns, n_rows, tables=None) -> Iterator[dict[str, 
         row: dict[str, Any] = {}
         cache: dict[str, Any] = {}
         ctx = GenContext(rng=rng, faker=faker, row_index=i, tables=tables,
-                         row=row, cache=cache)
+                         row=row, cache=cache, memo=memo)
         for col, fn in resolved:
             ctx.column = col.name
             if col.null_rate > 0 and rng.random() < col.null_rate:

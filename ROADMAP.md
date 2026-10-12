@@ -577,12 +577,19 @@ Tracking epic: #92. Redaction test documents are out of scope; they live in
       `date_filed`; only Closed cases carry `date_terminated`, never before
       filing; nature of suit is civil-only; only individuals are pro se.
       Locked by `tests/test_case_management_preset.py`.
-      **Known gaps:** `fk` copies only the key, so docket entries and
-      hearings can predate their case and a hearing's judge needn't be the
-      case's judge (#77). The preset keeps its helper columns
+      **Known gaps:** the preset keeps its helper columns
       (`nos_candidate`, `filed_month`, ...) because chaff has no hidden
       columns. Docket text is still lorem (#78).
-- [ ] Correlated FKs: children consistent with parents (#77, ADR first)
+- [x] **Correlated FKs (#77, ADR-0043).** `fk` remembers the parent row it
+      picked; a new `parent` generator copies its cells; `fk` takes `where`
+      and `match` filters; date generators take `after`/`before`, including
+      `"case_id.date_filed"` through an fk. Opt-in and entropy-free, so
+      existing specs are byte-identical (digest-pinned). `case_management`
+      now keeps every child date inside its case, hearings on the case's
+      judge, the case's court equal to its judge's, magistrates in the same
+      court, and criminal-only filings on criminal cases.
+      **Not built:** children-per-parent distributions (fk still picks
+      uniformly); `where` is equality only.
 - [ ] Realistic docket text and case notes (#78)
 - [ ] Near-duplicate parties with an answer key (#79)
 - [ ] `.eml` email intake encoder (#80)

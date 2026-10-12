@@ -82,7 +82,7 @@ _GROUP_ORDER: list[tuple[str, list[str]]] = [
     ("Web & network", ["ipv4", "ipv6", "mac_address", "domain", "url",
                        "user_agent", "http_method", "http_status", "port"]),
     ("Finance", ["currency_code", "credit_card", "iban"]),
-    ("Relationships", ["fk"]),
+    ("Relationships", ["fk", "parent"]),
     ("Computed", ["derived"]),
 ]
 
@@ -115,6 +115,7 @@ class GenContext:
     row: Any = None   # the in-progress row dict (cells generated so far), for `derived`
     cache: Any = None   # per-row scratch shared across a row's generators (geo linking)
     column: Any = None  # name of the column currently being generated (cache key)
+    memo: Any = None    # per-table scratch that outlives a row (filtered-fk indexes, ADR-0043)
 
 
 # ── Identity / people ────────────────────────────────────────────────
@@ -245,6 +246,14 @@ def fk(ctx: GenContext, p: dict) -> Any:
     FK dependency, so a valid reference always exists. Value is picked with
     ctx.rng, so it stays deterministic under a fixed seed.
 
+    Optional filters (ADR-0043) narrow which parents qualify:
+      where: {"title": "Magistrate Judge"}  parent cell equals a literal
+      match: {"court": "court"}             parent cell equals this row's cell
+    No qualifying parent → None (e.g. no magistrate in that court).
+
+    The chosen parent row is kept in ctx.cache under this column's name, so
+    `parent` columns can copy its other cells. Reading it costs no entropy.
+
     Example: {"table": "customers", "column": "customer_id"}
     """
     table, column = p["table"], p["column"]
@@ -253,7 +262,48 @@ def fk(ctx: GenContext, p: dict) -> Any:
     parent = ctx.tables[table]
     if not parent:
         raise ValueError(f"fk parent table '{table}' produced no rows")
-    return ctx.rng.choice(parent)[column]
+    where, match = p.get("where"), p.get("match")
+    if where or match:
+        parent = _filtered_parents(ctx, table, parent, where or {}, match or {})
+        if not parent:
+            if ctx.cache is not None and ctx.column is not None:
+                ctx.cache[ctx.column] = None
+            return None
+    chosen = ctx.rng.choice(parent)
+    if ctx.cache is not None and ctx.column is not None:
+        ctx.cache[ctx.column] = chosen
+    return chosen[column]
+
+
+def _filtered_parents(ctx: GenContext, table: str, rows: list, where: dict, match: dict) -> list:
+    """Parents passing `where` and `match`, in table order (so rng.choice
+    stays deterministic). Rows are bucketed once per (table, filter) in
+    ctx.memo, so a big child table doesn't rescan its parent per row."""
+    key = ("fk", table, tuple(sorted(where.items())), tuple(sorted(match)))
+    memo = ctx.memo if ctx.memo is not None else {}
+    index = memo.get(key)
+    if index is None:
+        index = {}
+        for r in rows:
+            if all(r.get(k) == v for k, v in where.items()):
+                index.setdefault(tuple(r.get(k) for k in sorted(match)), []).append(r)
+        memo[key] = index
+    row = ctx.row or {}
+    return index.get(tuple(row.get(match[k]) for k in sorted(match)), [])
+
+
+@generator("parent", example={"via": "customer_id", "column": "signed_up"})
+def parent(ctx: GenContext, p: dict) -> Any:
+    """Copy a cell from the parent row an earlier `fk` column picked (ADR-0043).
+
+    params: via (the fk column in this table), column (a column of that fk's
+    parent table). A hearing's judge can be its case's judge, a docket entry
+    can know when its case was filed. A null fk gives None. No entropy.
+
+    Example: {"via": "case_id", "column": "date_filed"}
+    """
+    chosen = (ctx.cache or {}).get(p["via"])
+    return None if chosen is None else chosen.get(p["column"])
 
 
 # ── Numbers ──────────────────────────────────────────────────────────
@@ -314,10 +364,42 @@ def _parse_dt(s: str) -> datetime:
     return datetime.fromisoformat(s)
 
 
+def _bounded(ctx: GenContext, p: dict, start: datetime, end: datetime) -> tuple[datetime, datetime]:
+    """Narrow [start, end] by the row's own cells (ADR-0043): {"after": col}
+    raises the floor to that cell, {"before": col} lowers the ceiling; either
+    may be "fk_col.parent_col" to read through an fk (see `_cell`). A null
+    cell leaves the literal bound alone. A floor above the ceiling collapses to
+    the floor, so a case filed after the window still gets a sane date. Reads
+    only — no entropy — so specs without after/before are byte-identical."""
+    after, before = _cell(ctx, p.get("after")), _cell(ctx, p.get("before"))
+    if after is not None:
+        start = max(start, _parse_dt(str(after)))
+    if before is not None:
+        end = min(end, _parse_dt(str(before)))
+    return start, end
+
+
+def _cell(ctx: GenContext, ref: Any) -> Any:
+    """A row cell by name, or a parent's cell through an fk: "case_id.date_filed"
+    reads date_filed from the case the `case_id` fk picked. A plain column name
+    wins, so a column whose own name contains a dot still resolves."""
+    if ref is None:
+        return None
+    row = ctx.row or {}
+    if ref in row:
+        return row[ref]
+    via, _, column = str(ref).partition(".")
+    chosen = (ctx.cache or {}).get(via)
+    return None if chosen is None else chosen.get(column)
+
+
 @generator("date_between", example={"start": "2024-01-01", "end": "2026-01-01"})
 def date_between(ctx: GenContext, p: dict) -> str:
+    """A date in [start, end]. Optional {"after": col} / {"before": col} bound
+    it by earlier cells in the row, e.g. a docket entry after its case filed."""
     start = _parse_dt(p.get("start", "2024-01-01"))
     end = _parse_dt(p.get("end", "2026-01-01"))
+    start, end = _bounded(ctx, p, start, end)
     delta = (end - start).days
     return (start + timedelta(days=ctx.rng.randint(0, max(delta, 0)))).date().isoformat()
 
@@ -327,8 +409,11 @@ def date_between(ctx: GenContext, p: dict) -> str:
     example={"start": "2024-01-01T00:00:00", "end": "2026-01-01T00:00:00"},
 )
 def timestamp_between(ctx: GenContext, p: dict) -> str:
+    """A timestamp in [start, end], optionally bounded by {"after": col} /
+    {"before": col} like `date_between`. A date-only bound means midnight."""
     start = _parse_dt(p.get("start", "2024-01-01T00:00:00"))
     end = _parse_dt(p.get("end", "2026-01-01T00:00:00"))
+    start, end = _bounded(ctx, p, start, end)
     secs = int((end - start).total_seconds())
     return (start + timedelta(seconds=ctx.rng.randint(0, max(secs, 0)))).isoformat()
 

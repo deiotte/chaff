@@ -158,7 +158,7 @@ change `output.format` for a different encoding.
 
 ## What is implemented
 
-- **54 semantic generators** for people, geography, identifiers, dates,
+- **55 semantic generators** for people, geography, identifiers, dates,
   telemetry, finance-shaped test values, text, and distributions. Registry
   examples supply parameter shapes to the UI; `chaff registry` lists the IDs.
 - **Related tables:** `tables` plus `fk` columns generate in dependency order.
@@ -167,6 +167,10 @@ change `output.format` for a different encoding.
   8 linked tables (cases, judges, attorneys, parties, representations, docket
   entries, hearings, audit events) with case numbers whose year matches the
   filing date.
+- **Correlated tables:** a child row can agree with its parent. `parent`
+  copies a cell from the row an `fk` picked, `fk` takes `where`/`match`
+  filters (a magistrate from the same court), and date generators take
+  `after`/`before` bounds such as `"case_id.date_filed"` (ADR-0043).
 - **Stateful entities:** `entity.count × entity.ticks` snapshots, including
   engine-supplied ID and tick columns. `movement`, `lifecycle`, and `drift`
   update state. See [moving_tracks](examples/moving_tracks.json) and
