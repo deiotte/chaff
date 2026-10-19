@@ -104,3 +104,50 @@ def test_new_generators_are_deterministic():
             + [{"name": "lat_ms", "generator": "lognormal", "params": {"mu": 3, "sigma": 1}},
                {"name": "status", "generator": "http_status"}]}
     assert generate_rows(load_spec(spec)) == generate_rows(load_spec(spec))
+
+
+# ── first_name sex (sex / sex_from) ──────────────────────────────────
+
+def _names(seed=7, rows=400):
+    spec = load_spec({"name": "t", "seed": seed, "rows": rows, "columns": [
+        {"name": "sex", "generator": "choice", "params": {"values": ["F", "M", "U"]}},
+        {"name": "given", "generator": "first_name", "params": {"sex_from": "sex"}},
+        {"name": "f", "generator": "first_name", "params": {"sex": "Female"}},
+        {"name": "m", "generator": "first_name", "params": {"sex": "M"}},
+    ], "output": {"format": "csv"}})
+    return list(generate_rows(spec))
+
+
+def test_first_name_sex_draws_from_the_matching_list():
+    rows = _names()
+    from faker.providers.person.en_US import Provider
+    female, male = set(Provider.first_names_female), set(Provider.first_names_male)
+    assert all(r["f"] in female for r in rows)
+    assert all(r["m"] in male for r in rows)
+    assert all(r["given"] in female for r in rows if r["sex"] == "F")
+    assert all(r["given"] in male for r in rows if r["sex"] == "M")
+    # U (or anything unrecognised) is an unrestricted draw, not an error.
+    assert all(r["given"] for r in rows if r["sex"] == "U")
+
+
+def test_first_name_sex_is_seed_deterministic():
+    assert _names(seed=11) == _names(seed=11)
+
+
+def test_first_name_without_params_is_unchanged():
+    # Presets written before the param existed keep their exact bytes (INV-3):
+    # the no-param path draws from faker.first_name() exactly as before.
+    from faker import Faker
+    fake = Faker()
+    fake.seed_instance(42)
+    expected = [fake.first_name() for _ in range(5)]
+    assert col("first_name", rows=5, seed=42) == expected
+
+
+def test_first_name_sex_from_must_be_declared_earlier():
+    import pytest
+    with pytest.raises(ValueError, match="sex_from"):
+        load_spec({"name": "t", "seed": 1, "rows": 1, "columns": [
+            {"name": "given", "generator": "first_name", "params": {"sex_from": "sex"}},
+            {"name": "sex", "generator": "choice", "params": {"values": ["F"]}},
+        ], "output": {"format": "csv"}})

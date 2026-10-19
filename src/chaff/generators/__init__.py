@@ -126,8 +126,23 @@ def full_name(ctx: GenContext, p: dict) -> str:
     return ctx.faker.name()
 
 
-@generator("first_name")
+_FEMALE = {"f", "female", "woman"}
+_MALE = {"m", "male", "man"}
+
+
+@generator("first_name", example={"sex": "F"})
 def first_name(ctx: GenContext, p: dict) -> str:
+    """A given name. {"sex": "F"} or {"sex": "M"} (also Female/Male) draws a
+    name that fits; {"sex_from": "<earlier column>"} reads the sex from that
+    cell instead, so a row's name agrees with its own `gender` or sex column.
+    Any other value (U, Non-binary, a null) gets an unrestricted draw, which is
+    also what no param gives."""
+    sex = (ctx.row or {}).get(p["sex_from"]) if "sex_from" in p else p.get("sex")
+    key = str(sex).strip().lower() if sex is not None else ""
+    if key in _FEMALE:
+        return ctx.faker.first_name_female()
+    if key in _MALE:
+        return ctx.faker.first_name_male()
     return ctx.faker.first_name()
 
 
