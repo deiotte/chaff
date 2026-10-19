@@ -162,6 +162,10 @@ change `output.format` for a different encoding.
 - **57 semantic generators** for people, geography, identifiers, dates,
   telemetry, finance-shaped test values, text, and distributions. Registry
   examples supply parameter shapes to the UI; `chaff registry` lists the IDs.
+- **Names that fit the row:** `first_name` takes `{"sex": "F"}` or
+  `{"sex_from": "<earlier column>"}`, so a row's given name agrees with its own
+  sex or `gender` cell. Any other value, or none, draws from the full list, as
+  before.
 - **Related tables:** `tables` plus `fk` columns generate in dependency order.
   See [retail_orders](examples/retail_orders.json), or
   [case_management](examples/case_management.json) for a court case system:

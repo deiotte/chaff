@@ -452,6 +452,10 @@ class DatasetSpec(BaseModel):
                     raise ValueError(
                         f"{where} column '{c.name}': '{c.generator}' needs 'source' naming a "
                         f"column declared before it, not {p.get('source')!r}")
+                if c.generator == "first_name" and "sex_from" in p and p["sex_from"] not in declared:
+                    raise ValueError(
+                        f"{where} column '{c.name}': 'sex_from' references "
+                        f"{p['sex_from']!r}, which must be a column declared before it")
                 if c.generator == "fk":
                     fks[c.name] = p.get("table")
                 declared.add(c.name)
