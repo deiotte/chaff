@@ -192,4 +192,3 @@ Verify the whole path, not just the chaff receipt:
 `sent 480 record(s)` means the local TCP socket accepted 480 encoded events;
 it is not proof that TAK parsed, routed, persisted, or displayed them. With
 UDP, even that transport-level signal is unavailable.
-

@@ -167,4 +167,3 @@ See [ADR-0031](adr/0031-build-input-integrity.md).
 | Early CoT markers appear but later updates disappear | Refresh `base_time` immediately before the run and pace at `entity.count / interval_seconds`; otherwise reports can arrive after their stale time. |
 | UI Push rejects an internal TAK hostname | Add the exact destination to `CHAFF_STREAM_ALLOWED_HOSTS` on a token-enabled deployment. The source CLI does not apply the API egress policy. |
 | Docker cannot reach a TAK server at `localhost` | `localhost` inside the chaff container is the container. Use a routable TAK/relay address on the container's network. |
-
