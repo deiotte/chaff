@@ -196,6 +196,10 @@ change `output.format` for a different encoding.
 - **Linked geography:** an opt-in country anchor supplies consistent city,
   timezone, currency, and position fields. See
   [crm_contacts_geo](examples/crm_contacts_geo.json).
+- **Plant feeds:** `schedule` (a value that follows the clock) and `follow` (a
+  temperature that lags its target) updaters, and the `cps_feed` format that
+  writes the result as `cps-feed/1` sample and write lines. See
+  [cps_case_feed](examples/cps_case_feed.json) (ADR-0045).
 - **Correlated scenes:** one moving scene can be rendered through several
   observers, each with its own identifiers, bounded position error, and output
   format. A separate truth file records identity and position for scoring. See

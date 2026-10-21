@@ -619,3 +619,7 @@ Tracking epic: #92. Redaction test documents are out of scope; they live in
 - AI/ML training data production (INV-5)
 - Data anonymization / production-data masking (that's Tonic's lane; chaff
   generates from nothing)
+- [x] **Plant feeds (ADR-0045).** `schedule` and `follow` updaters (a value that
+      follows the clock, a temperature that lags its target) and the `cps_feed`
+      format (`cps-feed/1` sample and write lines, per record so it streams).
+      Example: `examples/cps_case_feed.json`. Not yet: historian deadband.
