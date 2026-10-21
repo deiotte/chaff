@@ -103,3 +103,19 @@ Consequently a correctly built `v0.2.0` or later tagged package can still report
 `0.1.0`. This is a release/version-alignment gap, separate from whether the
 build/upload jobs run. Keep the tag and commit as the release identity until
 version propagation is implemented and tested across these locations.
+
+## v0.3.0 Windows attachment failure
+
+The v0.3.0 tag did start both desktop workflows. macOS uploaded successfully.
+Windows generated an empty notices file after a `UnicodeEncodeError`: the
+runner's default cp1252 encoding could not encode a license author's name.
+PowerShell continued into the successful license check, masking the failure.
+The release step uploaded the `.exe` and `.msi`, then failed because GitHub
+rejects zero-byte assets. Thus the Windows download files can exist even when
+that workflow is red; they also carry the empty notices file from that build.
+
+The fix writes notices explicitly as UTF-8, separates generation and license
+checking into independent Windows steps, and rejects an empty notices file in
+the desktop smoke check. A new release containing the fix is needed to ship
+corrected notices inside the Windows packages; rerunning the original v0.3.0
+commit alone still uses the old generator. Preserve the published tag.
