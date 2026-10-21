@@ -142,3 +142,91 @@ def drift(ctx: EntityContext, state: dict, p: dict) -> None:
     if "max" in p:
         value = min(value, float(p["max"]))
     state[col] = round(value, int(p.get("precision", 2)))
+
+
+# ── Schedule (a value that follows the clock) ────────────────────────
+
+def _clock_minutes(base_time: str, interval_seconds: float, tick: int) -> float:
+    """Minutes since 1970 at `tick`, from spec constants only (INV-3)."""
+    from datetime import datetime, timezone
+
+    s = str(base_time).strip().replace("Z", "+00:00")
+    dt = datetime.fromisoformat(s)
+    dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return (dt.timestamp() + interval_seconds * tick) / 60.0
+
+
+@updater("schedule", example={
+    "column": "reading", "default": 0, "fired_column": "reading_fired",
+    "base_time": "2025-01-01T00:00:00Z", "interval_seconds": 60,
+    "entries": [{"at": "03:00", "for_minutes": 25, "value": 1}],
+})
+def schedule(ctx: EntityContext, state: dict, p: dict) -> None:
+    """Set a column from the time of day: a plant's schedule, not a dice roll.
+
+    params: column (required), entries (required) as
+            [{"at": "HH:MM", "value": v, "for_minutes": n?}, ...] in UTC,
+            default (0) — the value outside every window, before every point,
+            fired_column (optional) — set True on the tick an entry starts,
+            base_time ('2025-01-01T00:00:00Z'), interval_seconds (1.0) — the
+            same two options the output format reads, so a tick has the one
+            time whichever of them asks.
+    An entry with `for_minutes` is a window: it holds `value`, then the column
+    returns to `default`. An entry without is a point: it holds `value` until
+    the next entry (the setpoint a schedule writes at 06:00 and 22:00).
+    Pure over the tick: no rng, no wall clock (INV-3).
+    """
+    base = p.get("base_time", "2025-01-01T00:00:00Z")
+    step = float(p.get("interval_seconds", 1.0))
+    now = _clock_minutes(base, step, ctx.tick)
+    before = _clock_minutes(base, step, ctx.tick - 1)
+    entries = []
+    for e in p["entries"]:
+        hh, mm = str(e["at"]).split(":")
+        entries.append((int(hh) * 60 + int(mm), e))
+
+    def starts(t: float) -> list[tuple[float, dict]]:
+        day = (t // 1440) * 1440
+        return [(day + off + d, e) for d in (-1440, 0) for off, e in entries]
+
+    value = p.get("default", 0)
+    held_since = float("-inf")
+    for start, e in starts(now):
+        if start > now:
+            continue
+        w = e.get("for_minutes")
+        if w is not None and now >= start + float(w):
+            continue
+        if start >= held_since:
+            held_since, value = start, e["value"]
+    state[p["column"]] = value
+    fired = p.get("fired_column")
+    if fired:
+        state[fired] = any(before < s <= now for s, _ in starts(now))
+
+
+# ── Follow (a process value that relaxes toward a target) ────────────
+
+@updater("follow", example={"column": "reading", "target": 5.0, "rate": 0.5, "precision": 2})
+def follow(ctx: EntityContext, state: dict, p: dict) -> None:
+    """Move a numeric column a fraction of the way toward a target each tick.
+
+    params: column (required), target (required) — a number, or the name of
+            another column, rate (0.1) — the fraction closed per tick,
+            lift_column / lift (optional) — added to the target while the
+            lift column is truthy (a defrost warms the case),
+            stddev (0) — sensor noise, precision (2).
+    First-order lag: what a temperature does, which a random walk does not.
+    """
+    t = p["target"]
+    target = float(state.get(t, 0.0)) if isinstance(t, str) else float(t)
+    lc = p.get("lift_column")
+    if lc and state.get(lc):
+        target += float(p.get("lift", 0.0))
+    col = p["column"]
+    value = float(state.get(col, target))
+    value += (target - value) * float(p.get("rate", 0.1))
+    sd = float(p.get("stddev", 0.0))
+    if sd:
+        value += ctx.rng.gauss(0, sd)
+    state[col] = round(value, int(p.get("precision", 2)))

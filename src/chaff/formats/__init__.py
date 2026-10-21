@@ -268,7 +268,7 @@ def to_xml(spec: DatasetSpec, rows: list[dict]) -> bytes:
 # ── Sensor wire formats (stdlib, core) ───────────────────────────────
 # Cursor-on-Target (XML) and MISB ST 0903.6 VMTI (KLV). Both are binary- or
 # text-exact renderings of published standards and carry no heavy dep.
-from . import cot, klv, st0601  # noqa: E402,F401
+from . import cot, cps_feed, klv, st0601  # noqa: E402,F401
 
 
 # ── Legacy extracts (stdlib, core; ADR-0044) ─────────────────────────

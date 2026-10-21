@@ -1,0 +1,49 @@
+{
+  "name": "cps_case_feed",
+  "description": "PRESET: one refrigerated case for a day as cps-feed/1 lines: a defrost on a clock, a setpoint the supervisor rewrites twice a day, and a case temperature that lags both.",
+  "seed": 2026,
+  "columns": [
+    {"name": "setpoint", "generator": "float_uniform", "params": {"min": -18, "max": -18, "precision": 1}},
+    {"name": "case_temp", "generator": "float_uniform", "params": {"min": -18, "max": -18, "precision": 1}},
+    {"name": "defrost_status", "generator": "int_range", "params": {"min": 0, "max": 0}}
+  ],
+  "entity": {
+    "count": 1,
+    "ticks": 288,
+    "id_column": "equipment",
+    "id_pattern": "store-0412/aisle-3/case-07",
+    "tick_column": "tick",
+    "updates": [
+      {"updater": "schedule", "params": {
+        "column": "defrost_status", "default": 0,
+        "base_time": "2026-10-14T00:00:00Z", "interval_seconds": 300,
+        "entries": [
+          {"at": "02:00", "for_minutes": 30, "value": 1},
+          {"at": "08:00", "for_minutes": 30, "value": 1},
+          {"at": "14:00", "for_minutes": 30, "value": 1},
+          {"at": "20:00", "for_minutes": 30, "value": 1}
+        ]}},
+      {"updater": "schedule", "params": {
+        "column": "setpoint", "default": -21, "fired_column": "setpoint_fired",
+        "base_time": "2026-10-14T00:00:00Z", "interval_seconds": 300,
+        "entries": [
+          {"at": "05:00", "value": -19},
+          {"at": "21:00", "value": -21}
+        ]}},
+      {"updater": "follow", "params": {
+        "column": "case_temp", "target": "setpoint", "rate": 0.3, "stddev": 0.05, "precision": 1,
+        "lift_column": "defrost_status", "lift": 12}}
+    ]
+  },
+  "output": {"format": "cps_feed", "options": {
+    "base_time": "2026-10-14T00:00:00Z", "interval_seconds": 300,
+    "samples": {
+      "case_temp": {"tag": "CASE07.CASE_TEMP", "protocol_ref": "bacnet:device=7,object=AI:1", "unit": "degC"}
+    },
+    "writes": {
+      "setpoint": {"tag": "CASE07.SETPOINT", "protocol_ref": "bacnet:device=7,object=AV:2",
+                   "fire_column": "setpoint_fired", "channel": "supervisor", "address": "10.0.7.12"}
+    }
+  }},
+  "sink": {"sink": "file", "options": {"path": "out/cps_case_feed.jsonl"}}
+}
