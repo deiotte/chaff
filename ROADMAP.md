@@ -623,3 +623,7 @@ Tracking epic: #92. Redaction test documents are out of scope; they live in
       follows the clock, a temperature that lags its target) and the `cps_feed`
       format (`cps-feed/1` sample and write lines, per record so it streams).
       Example: `examples/cps_case_feed.json`. Not yet: historian deadband.
+- [ ] **Historian deadband (ADR-0046, Proposed).** A whole-run `cps_history` format that stores
+      only what moved past a required per-tag deadband, with contexts and flags, so the consumer's
+      learner can be judged on seeded months with a drift of known size. The learner's answer key
+      follows as its own ADR.
