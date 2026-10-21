@@ -38,10 +38,13 @@ jobs:
           pip install -e ".[api,formats-extra,nl,nl-openai]"
           pip install pyinstaller pip-licenses
 
+      # Separate steps so PowerShell cannot mask a failed generation command
+      # with a successful license check (v0.3.0 shipped an empty notices file).
       - name: Regenerate third-party notices (must match the frozen env)
-        run: |
-          python packaging/gen_notices.py
-          python packaging/gen_notices.py --check
+        run: python packaging/gen_notices.py
+
+      - name: Check bundled dependency licenses
+        run: python packaging/gen_notices.py --check
 
       - name: Build onefile exe
         run: pyinstaller packaging/chaff.spec
@@ -53,6 +56,7 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path "dist/chaff.exe")) { throw "chaff.exe not produced" }
+          if ((Get-Item THIRD-PARTY-NOTICES.txt).Length -eq 0) { throw "Third-party notices are empty" }
           Copy-Item THIRD-PARTY-NOTICES.txt dist/
           Get-Item dist/chaff.exe | Format-List Name, Length
 

@@ -148,7 +148,9 @@ def main() -> int:
         print(f"license-check OK: {len(entries)} bundled deps, all permissive.")
         return 0
 
-    OUT.write_text(render(entries))
+    # License/NOTICE author names are Unicode, including characters outside
+    # the Windows runner's default cp1252 codec (v0.3.0 failed on U+0144).
+    OUT.write_text(render(entries), encoding="utf-8")
     unknown = [e["Name"] for e in entries if (e.get("LicenseText") or "UNKNOWN") == "UNKNOWN"]
     print(f"wrote {OUT.name}: {len(entries)} deps"
           + (f"; no license file for: {unknown}" if unknown else "; all license texts captured"))
