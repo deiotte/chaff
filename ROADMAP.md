@@ -577,9 +577,10 @@ Tracking epic: #92. Redaction test documents are out of scope; they live in
       `date_filed`; only Closed cases carry `date_terminated`, never before
       filing; nature of suit is civil-only; only individuals are pro se.
       Locked by `tests/test_case_management_preset.py`.
-      **Known gaps:** the preset keeps its helper columns
-      (`nos_candidate`, `filed_month`, ...) because chaff has no hidden
-      columns. Docket text is still lorem (#78).
+      **Known gaps:** this preset still emits its helper columns
+      (`nos_candidate`, `filed_month`, ...); `hidden` support now exists
+      (ADR-0044) but has not been applied to this preset. Docket text is
+      still lorem (#78).
 - [x] **Correlated FKs (#77, ADR-0043).** `fk` remembers the parent row it
       picked; a new `parent` generator copies its cells; `fk` takes `where`
       and `match` filters; date generators take `after`/`before`, including
@@ -615,10 +616,7 @@ Tracking epic: #92. Redaction test documents are out of scope; they live in
 - [ ] Phone and portal intake (#89)
 - [ ] Retention, disposition and load presets (#90)
 
-## Non-goals (permanent)
-- AI/ML training data production (INV-5)
-- Data anonymization / production-data masking (that's Tonic's lane; chaff
-  generates from nothing)
+## Plant test feeds
 - [x] **Plant feeds (ADR-0045).** `schedule` and `follow` updaters (a value that
       follows the clock, a temperature that lags its target) and the `cps_feed`
       format (`cps-feed/1` sample and write lines, per record so it streams).
@@ -627,3 +625,8 @@ Tracking epic: #92. Redaction test documents are out of scope; they live in
       only what moved past a required per-tag deadband, with contexts and flags, so the consumer's
       learner can be judged on seeded months with a drift of known size. The learner's answer key
       follows as its own ADR.
+
+## Non-goals (permanent)
+- AI/ML training data production (INV-5)
+- Data anonymization / production-data masking (that's Tonic's lane; chaff
+  generates from nothing)
