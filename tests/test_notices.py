@@ -52,6 +52,11 @@ def test_license_or_is_a_choice_and_and_binds_every_term():
     assert ok("MIT AND MPL-2.0")
     assert ok("(MIT OR Apache-2.0) AND BSD-3-Clause")
     assert ok("Apache Software License")
+    # Trove names carry a bracketed alias; that is not a group (shellingham).
+    assert ok("ISC License (ISCL)")
+    assert ok("Mozilla Public License 2.0 (MPL 2.0)")
+    assert ok("BSD License (BSD-3-Clause) OR GPL-3.0")
+    assert not ok("GNU General Public License v3 (GPLv3)")
     assert not ok("MIT AND GPL-3.0")
     assert not ok("(MIT OR GPL-3.0) AND GPL-3.0")
     assert not ok("GPL-3.0")

@@ -195,8 +195,22 @@ def _license_ok(lic: str) -> bool:
             if pos < len(tokens) and tokens[pos] == ")":
                 pos += 1
             return ok
-        words = []  # a licence name can contain spaces ("apache software license")
-        while pos < len(tokens) and tokens[pos] not in ("and", "or", "(", ")"):
+        # A licence name can contain spaces ("apache software license") and a
+        # bracketed alias straight after it ("ISC License (ISCL)", trove-style):
+        # a "(" that follows a name is part of the name, not a group.
+        words = []
+        while pos < len(tokens) and tokens[pos] not in ("and", "or", ")"):
+            if tokens[pos] == "(":
+                if not words:
+                    break
+                depth = 0
+                while pos < len(tokens):
+                    depth += {"(": 1, ")": -1}.get(tokens[pos], 0)
+                    words.append(tokens[pos])
+                    pos += 1
+                    if depth == 0:
+                        break
+                continue
             words.append(tokens[pos])
             pos += 1
         return bool(words) and term_ok(" ".join(words))
