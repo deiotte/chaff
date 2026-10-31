@@ -88,8 +88,10 @@ build. Secret presence was not checked during this documentation review.
 
 The macOS spec builds the runner's native architecture (`target_arch=None`),
 not a universal binary. The desktop install includes
-`api,formats-extra,nl,nl-openai`; Kafka/MQTT dependencies and Google drafting
-are not included. Source/Docker installs are the full streaming path.
+`api,formats-extra,nl,nl-openai` plus the core dependencies, which include
+the HTTP and MQTT clients (ADR-0047). The Kafka client and Google drafting are
+not included; the desktop Stream tab shows Kafka as "not installed". Source and
+Docker installs are the full streaming path.
 
 **Version metadata is not derived from the tag today:**
 

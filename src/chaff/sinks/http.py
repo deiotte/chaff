@@ -1,9 +1,9 @@
 """HTTP POST streaming sink. See sinks/AGENTS.md.
 
 Delivers encoded records to a developer's endpoint, one record per request
-or in batches, with a retry policy and auth-header passthrough. httpx is
-heavy/optional, so it lives under the `streaming` extra and is imported
-lazily — core `import chaff.sinks` stays dep-free.
+or in batches, with a retry policy and auth-header passthrough. httpx is a
+pure-Python core dependency (ADR-0047); it is still imported lazily so
+`import chaff.sinks` stays cheap.
 
 INV-2: this sink groups and delivers record-bytes; it never parses or
 transforms them. Secrets (auth headers) come from options/env and are
@@ -23,7 +23,7 @@ from __future__ import annotations
 import time
 from typing import Iterator
 
-from . import stream_sink
+from . import missing_dependency, stream_sink
 from ..spec import DatasetSpec
 
 
@@ -38,14 +38,12 @@ def _batched(records: Iterator[bytes], n: int) -> Iterator[list[bytes]]:
         yield batch
 
 
-@stream_sink("http")
+@stream_sink("http", requires=("httpx",), extra="streaming")
 def http_sink(spec: DatasetSpec, records: Iterator[bytes]) -> str:
     try:
         import httpx
     except ImportError as e:  # pragma: no cover - exercised only without the extra
-        raise RuntimeError(
-            "http sink needs httpx. Install it with: pip install 'chaff[streaming]'"
-        ) from e
+        raise missing_dependency("http", "httpx") from e
 
     opts = spec.sink.options
     url = opts.get("url")

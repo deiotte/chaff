@@ -12,7 +12,7 @@ from . import __version__
 from .engine import run as run_engine
 from .formats import list_formats
 from .generators import list_generators
-from .sinks import list_sinks
+from .sinks import list_sink_status
 from .spec import load_spec
 
 app = typer.Typer(help="chaff — synthetic demo data engine.", no_args_is_help=True)
@@ -49,7 +49,12 @@ def registry():
 
     typer.echo("generators: " + ", ".join(list_generators()))
     typer.echo("formats:    " + ", ".join(list_formats()))
-    typer.echo("sinks:      " + ", ".join(list_sinks()))
+    # A sink whose client library isn't installed is still registered, so say
+    # so here — before someone builds a demo around it (ADR-0047).
+    status = list_sink_status()
+    typer.echo("sinks:      " + ", ".join(
+        sid if st["available"] else f"{sid} (not installed: {st['install']})"
+        for sid, st in status.items()))
     typer.echo("updaters:   " + ", ".join(list_updaters()))
 
 

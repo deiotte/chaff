@@ -4,9 +4,41 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>chaff — build a dataset</title>
+<script>
+  // Apply the saved theme before first paint so a dark-mode user never gets
+  // a white flash. "auto" (or nothing saved, or storage blocked) follows the
+  // OS setting via the media query below.
+  try {
+    const t = localStorage.getItem('chaff_theme');
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  } catch (e) { /* storage blocked: follow the OS */ }
+</script>
 <style>
-  :root { --bg:#f6f7f9; --card:#fff; --ink:#1c2330; --muted:#6b7484;
-          --line:#e2e6ec; --accent:#2f6f4f; --accent-ink:#fff; --bad:#b4232a; }
+  /* Every color is a token, so dark mode is one palette swap — not a hunt for
+     hard-coded hex. Add a color? Add a token, in all three blocks. */
+  :root { color-scheme:light;
+          --bg:#f6f7f9; --card:#fff; --ink:#1c2330; --muted:#6b7484;
+          --line:#e2e6ec; --accent:#2f6f4f; --accent-ink:#fff; --bad:#b4232a;
+          --field:#fff; --soft:#eef1f4; --accent-soft:#e7f1ec; --accent-wash:#f0f7f3;
+          --fx-bg:#f5faf7; --bad-soft:#f3e7e7; --warn-bg:#fbf3e6; --warn-wash:#fbf7e8;
+          --warn-line:#e6d9a8; --panel:#fbfcfd; --panel-2:#f6f8fa; --code-bg:#e8ecef;
+          --faint:#aaa; --feed-bg:#0f1115; --feed-ink:#d7e2dd; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { color-scheme:dark;
+          --bg:#0f1318; --card:#171c23; --ink:#e4e8ee; --muted:#9aa4b2;
+          --line:#2a313b; --accent:#5fbf8f; --accent-ink:#0d1a13; --bad:#f0787c;
+          --field:#10151b; --soft:#232a33; --accent-soft:#1d3328; --accent-wash:#18291f;
+          --fx-bg:#152219; --bad-soft:#3a1f22; --warn-bg:#33291a; --warn-wash:#2d2618;
+          --warn-line:#5c4a22; --panel:#141920; --panel-2:#1b2129; --code-bg:#262d36;
+          --faint:#6b7480; --feed-bg:#0a0c10; --feed-ink:#d7e2dd; }
+  }
+  :root[data-theme="dark"] { color-scheme:dark;
+          --bg:#0f1318; --card:#171c23; --ink:#e4e8ee; --muted:#9aa4b2;
+          --line:#2a313b; --accent:#5fbf8f; --accent-ink:#0d1a13; --bad:#f0787c;
+          --field:#10151b; --soft:#232a33; --accent-soft:#1d3328; --accent-wash:#18291f;
+          --fx-bg:#152219; --bad-soft:#3a1f22; --warn-bg:#33291a; --warn-wash:#2d2618;
+          --warn-line:#5c4a22; --panel:#141920; --panel-2:#1b2129; --code-bg:#262d36;
+          --faint:#6b7480; --feed-bg:#0a0c10; --feed-ink:#d7e2dd; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
          font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
@@ -20,7 +52,7 @@
              letter-spacing:.6px; color:var(--muted); }
   label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
   input, select, textarea { width:100%; padding:8px 10px; border:1px solid var(--line);
-         border-radius:7px; font:inherit; background:#fff; color:inherit; }
+         border-radius:7px; font:inherit; background:var(--field); color:inherit; }
   textarea { resize:vertical; min-height:36px; font-family:ui-monospace,Menlo,monospace; font-size:13px; }
   .row3 { display:grid; grid-template-columns:2fr 1fr 1fr; gap:12px; }
   .cols-head, .col { display:grid; gap:10px;
@@ -29,14 +61,14 @@
   .cols-head span { font-size:12px; color:var(--muted); }
   .col .c-hidden { width:18px; height:18px; padding:0; justify-self:center; margin-bottom:10px; }
   .col { margin-bottom:10px; }
-  .fxpanel { grid-column:1 / -1; margin-top:6px; padding:9px 11px; background:#f5faf7;
+  .fxpanel { grid-column:1 / -1; margin-top:6px; padding:9px 11px; background:var(--fx-bg);
              border:1px solid var(--line); border-radius:7px; }
   .fxpanel .fx { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .fxpanel .op { width:132px; padding:6px 8px; }
   .fxpanel .opr { width:62px; padding:6px 4px; text-align:center; }
-  .fxpanel .fxbtn { background:#e7f1ec; color:var(--accent); border:0; border-radius:6px;
+  .fxpanel .fxbtn { background:var(--accent-soft); color:var(--accent); border:0; border-radius:6px;
                     padding:6px 10px; cursor:pointer; font:inherit; font-weight:600; }
-  .fxpanel .fxx { background:#f3e7e7; color:var(--bad); border:0; border-radius:6px;
+  .fxpanel .fxx { background:var(--bad-soft); color:var(--bad); border:0; border-radius:6px;
                   width:26px; height:32px; cursor:pointer; }
   .fxpanel .fxfoot { display:flex; justify-content:space-between; align-items:center;
                      gap:10px; margin-top:8px; }
@@ -46,10 +78,10 @@
                    border:0; padding:0; white-space:nowrap; }
   .btn { border:0; border-radius:7px; padding:9px 16px; font:inherit; font-weight:600;
          cursor:pointer; background:var(--accent); color:var(--accent-ink); }
-  .btn.ghost { background:#eef1f4; color:var(--ink); font-weight:500; }
+  .btn.ghost { background:var(--soft); color:var(--ink); font-weight:500; }
   .btn.mini { padding:8px 0; }
   .actions { display:flex; gap:10px; align-items:center; }
-  .x { background:#f3e7e7; color:var(--bad); border:0; border-radius:7px; height:36px; cursor:pointer; font-size:16px; }
+  .x { background:var(--bad-soft); color:var(--bad); border:0; border-radius:7px; height:36px; cursor:pointer; font-size:16px; }
   table { border-collapse:collapse; width:100%; font-size:13px; }
   th, td { text-align:left; padding:6px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
   th { color:var(--muted); font-weight:600; }
@@ -59,21 +91,21 @@
   .msg.ok { color:var(--accent); }
   .hint { color:var(--muted); font-size:12px; margin-top:2px; }
   .empty { color:var(--muted); font-size:13px; }
-  .advanced { margin-top:14px; border-top:1px solid #e6e6e6; padding-top:12px; }
+  .advanced { margin-top:14px; border-top:1px solid var(--line); padding-top:12px; }
   .adv-item { display:flex; align-items:center; justify-content:space-between; gap:12px;
-              background:#f6f8fa; border:1px solid #e1e6ea; border-radius:6px;
+              background:var(--panel-2); border:1px solid var(--line); border-radius:6px;
               padding:10px 12px; margin-top:8px; font-size:13px; }
-  .adv-meta { color:#666; font-size:12px; margin-top:3px; }
-  .adv-item code { background:#e8ecef; padding:1px 4px; border-radius:3px; }
+  .adv-meta { color:var(--muted); font-size:12px; margin-top:3px; }
+  .adv-item code { background:var(--code-bg); padding:1px 4px; border-radius:3px; }
   .preview-table-name { margin:14px 0 6px; font-size:12px; font-weight:600;
-                        text-transform:uppercase; letter-spacing:.04em; color:#555; }
+                        text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
   .preview-table-name:first-child { margin-top:0; }
   .hdr { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
   .hdr-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
   .hdr-right label { margin:0; white-space:nowrap; }
   .hdr-right input { width:190px; }
   .auth-banner { margin-top:12px; padding:10px 14px; border-radius:8px;
-                 background:#fbf3e6; border:1px solid #e6d9a8; font-size:13px; }
+                 background:var(--warn-bg); border:1px solid var(--warn-line); font-size:13px; }
   .hint-inline { font-weight:400; text-transform:none; letter-spacing:0; }
   .quit-note { max-width:1000px; margin:0 auto; padding:24px; color:var(--muted); }
   .adv-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
@@ -81,7 +113,7 @@
   .adv-add { padding:7px 13px; }
   .adv-add:disabled { opacity:.45; cursor:not-allowed; }
   .adv-box { margin-top:12px; border:1px solid var(--line); border-radius:9px;
-             padding:13px 14px; background:#fbfcfd; }
+             padding:13px 14px; background:var(--panel); }
   .adv-box > h3 { margin:0 0 10px; font-size:12px; text-transform:uppercase;
                   letter-spacing:.6px; color:var(--muted);
                   display:flex; align-items:center; gap:8px; }
@@ -93,23 +125,23 @@
   .tbl-head { display:grid; grid-template-columns:2fr 1fr 32px; gap:10px; align-items:end; }
   .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px; }
   .spec-card { text-align:left; border:1px solid var(--line); border-radius:9px; padding:11px 12px;
-               background:#fff; cursor:pointer; font:inherit; color:inherit; transition:border-color .12s; }
+               background:var(--card); cursor:pointer; font:inherit; color:inherit; transition:border-color .12s; }
   .spec-card:hover { border-color:var(--accent); }
   .spec-card .nm { font-weight:600; font-size:14px; display:flex; justify-content:space-between; gap:6px; align-items:center; }
   .spec-card .badge { font-size:10px; text-transform:uppercase; letter-spacing:.5px; padding:2px 6px;
-                      border-radius:20px; background:#eef1f4; color:var(--muted); font-weight:600; }
-  .spec-card .badge.saved { background:#e7f1ec; color:var(--accent); }
+                      border-radius:20px; background:var(--soft); color:var(--muted); font-weight:600; }
+  .spec-card .badge.saved { background:var(--accent-soft); color:var(--accent); }
   .spec-card .meta { color:var(--muted); font-size:12px; margin-top:5px; }
   .spec-card .desc { color:var(--ink); font-size:12px; margin-top:6px; opacity:.75;
                      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .save-row { display:flex; gap:8px; margin-top:12px; align-items:center; }
   .save-row input { max-width:220px; }
   .feed { max-height:260px; overflow:auto; margin:12px 0 0; padding:12px;
-          background:#0f1115; color:#d7e2dd; border:1px solid var(--line); border-radius:8px;
+          background:var(--feed-bg); color:var(--feed-ink); border:1px solid var(--line); border-radius:8px;
           font:12px/1.5 ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-word; }
   .feed.empty { color:var(--muted); background:var(--card); }
   .tabs { display:flex; gap:4px; margin-bottom:-20px; }
-  .tab { border:1px solid var(--line); background:#eef1f4; color:var(--muted); padding:10px 20px;
+  .tab { border:1px solid var(--line); background:var(--soft); color:var(--muted); padding:10px 20px;
          font:inherit; font-weight:600; cursor:pointer; border-radius:10px 10px 0 0; }
   .tab.active { color:var(--ink); background:var(--card); border-bottom-color:var(--card); }
   .tab .sub { font-weight:400; font-size:12px; color:var(--muted); }
@@ -118,20 +150,24 @@
   .radio-row { display:flex; flex-wrap:wrap; gap:8px; }
   .radio-row label { display:flex; align-items:center; gap:6px; padding:7px 12px; border:1px solid var(--line);
                      border-radius:20px; cursor:pointer; font-size:13px; color:var(--ink); margin:0; width:auto; }
-  .radio-row label.sel { border-color:var(--accent); background:#f0f7f3; color:var(--accent); font-weight:600; }
+  .radio-row label.sel { border-color:var(--accent); background:var(--accent-wash); color:var(--accent); font-weight:600; }
   .radio-row input { width:auto; margin:0; }
   .sink-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; margin-top:14px; }
   .sink-fields:empty { display:none; }
   .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; padding:4px 11px; border-radius:20px;
-          background:#eef1f4; color:var(--muted); font-weight:600; }
-  .pill.run { background:#e7f1ec; color:var(--accent); }
-  .pill.err { background:#f6e7e7; color:var(--bad); }
+          background:var(--soft); color:var(--muted); font-weight:600; }
+  .pill.run { background:var(--accent-soft); color:var(--accent); }
+  .pill.err { background:var(--bad-soft); color:var(--bad); }
   .pill .dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
-  .reconfirm { margin-top:12px; padding:11px 13px; border:1px solid #e6d9a8; background:#fbf7e8;
+  .reconfirm { margin-top:12px; padding:11px 13px; border:1px solid var(--warn-line); background:var(--warn-wash);
                border-radius:8px; font-size:13px; display:none; align-items:center;
                justify-content:space-between; gap:12px; }
   .reconfirm.show { display:flex; }
   .reconfirm .btn { padding:7px 14px; }
+  .radio-row label.off { opacity:.5; cursor:not-allowed; }
+  .missing-sinks { margin-top:10px; }
+  .null { color:var(--faint); }
+  .theme-btn { padding:8px 12px; white-space:nowrap; }
 </style>
 </head>
 <body>
@@ -144,6 +180,9 @@
     <!-- Desktop builds only (ADR-0023). The web/Docker UI never shows this:
          /shutdown 404s unless CHAFF_DESKTOP=1. -->
     <div class="hdr-right">
+      <!-- Auto follows the OS; Dark/Light override it in this browser only. -->
+      <button class="btn ghost theme-btn" id="themeBtn" type="button"
+              title="Switch between automatic, dark, and light colors">Theme: Auto</button>
       <!-- Gates every API route (ADR-0025), so it lives here rather than in
            the Stream tab where it used to be. Blank is correct for a local
            server: chaff serves localhost without a token. -->
@@ -259,6 +298,9 @@
     <section class="card">
       <h2>Deliver to <span style="font-weight:400;text-transform:none;letter-spacing:0">— watch it live, or push it to your pipeline</span></h2>
       <div class="radio-row" id="deliveryPicker"></div>
+      <!-- Lists targets whose client library this server lacks, with the
+           install command (ADR-0047). Empty — and hidden — when all work. -->
+      <p class="hint missing-sinks" id="missingSinks" hidden></p>
       <div class="row3" style="margin-top:14px">
         <div><label>Format (record-oriented)</label>
           <select id="strFormat">
@@ -346,6 +388,12 @@ async function loadRegistry() {
   UPDATERS = reg.updaters || [];
   if (reg.desktop) $('quitBtn').hidden = false;
   UPD_EXAMPLES = reg.updater_examples || {};
+  SINK_STATUS = reg.sink_status || {};
+  // Re-render the picker with availability; only reset the fields if the
+  // selection had to change (so typed broker/topic values survive a reload).
+  const before = _delivery;
+  renderDeliveryPicker();
+  if (_delivery !== before) renderSinkFields();
   // Grouped for the dropdown; fall back to one flat group for older servers.
   GEN_GROUPS = reg.generator_groups || [{ group: '', generators: reg.generators }];
   const fmt = $('format');
@@ -838,7 +886,7 @@ function previewTable(rows) {
   const cols = Object.keys(rows[0]);
   const head = '<tr>' + cols.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
   const body = rows.map(r => '<tr>' + cols.map(c =>
-    `<td>${r[c] === null ? '<span style="color:#aaa">null</span>' : esc(r[c])}</td>`).join('') + '</tr>').join('');
+    `<td>${r[c] === null ? '<span class="null">null</span>' : esc(r[c])}</td>`).join('') + '</tr>').join('');
   return `<table>${head}${body}</table>`;
 }
 
@@ -999,20 +1047,43 @@ const DELIVERY_HINT = {
   udp: 'chaff sends raw record datagrams to host:port (UDP; keep records small).',
 };
 let _delivery = 'ws';
+// sink id -> {available, missing, install}, from /registry (ADR-0047). Empty
+// until the registry loads; an absent entry is treated as available so an
+// older server that doesn't report status behaves as before.
+let SINK_STATUS = {};
+
+function sinkUnavailable(d) {
+  const st = d.sink && SINK_STATUS[d.sink];
+  return st && st.available === false ? st : null;
+}
 
 function renderDeliveryPicker() {
   const box = $('deliveryPicker');
   box.innerHTML = '';
+  // Never leave a now-unavailable target selected.
+  if (sinkUnavailable(DELIVERY[_delivery])) _delivery = 'ws';
+  const missing = [];
   Object.entries(DELIVERY).forEach(([key, d]) => {
+    const st = sinkUnavailable(d);
     const lab = document.createElement('label');
-    lab.className = key === _delivery ? 'sel' : '';
+    lab.className = (key === _delivery ? 'sel' : '') + (st ? ' off' : '');
     const radio = document.createElement('input');
     radio.type = 'radio'; radio.name = 'delivery'; radio.value = key; radio.checked = key === _delivery;
+    radio.disabled = !!st;
     radio.onchange = () => { _delivery = key; renderDeliveryPicker(); renderSinkFields(); };
     lab.appendChild(radio);
-    lab.appendChild(document.createTextNode(d.label));
+    lab.appendChild(document.createTextNode(d.label + (st ? ' (not installed)' : '')));
+    if (st) {
+      lab.title = `Not installed on this server. Install with: ${st.install}`;
+      missing.push(`${d.label}: ${st.install}`);
+    }
     box.appendChild(lab);
   });
+  const note = $('missingSinks');
+  note.hidden = !missing.length;
+  note.textContent = missing.length
+    ? `Not installed on this server — ask whoever runs it to install, then restart: ${missing.join(' · ')}`
+    : '';
   $('deliveryHint').textContent = DELIVERY_HINT[_delivery] || '';
 }
 
@@ -1257,6 +1328,29 @@ $('apiToken').onchange = () => {
   loadRegistry().then(renderAdvancedUI).catch(() => {});
   refreshLibrary().catch(() => {});
 };
+// ── Theme: Auto (follow the OS) → Dark → Light → Auto ─────────────
+// The <head> script applied the saved choice before first paint; this keeps
+// the button label honest and saves new choices. Storage can be blocked, so
+// every read/write is guarded — the page still works, it just won't remember.
+const THEME_ORDER = ['auto', 'dark', 'light'];
+const THEME_LABEL = { auto: 'Theme: Auto', dark: 'Theme: Dark', light: 'Theme: Light' };
+function currentTheme() {
+  const t = document.documentElement.dataset.theme;
+  return t === 'dark' || t === 'light' ? t : 'auto';
+}
+function applyTheme(t) {
+  if (t === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  try {
+    if (t === 'auto') localStorage.removeItem('chaff_theme');
+    else localStorage.setItem('chaff_theme', t);
+  } catch (e) { /* not remembered; still applied for this visit */ }
+  $('themeBtn').textContent = THEME_LABEL[t];
+}
+$('themeBtn').onclick = () =>
+  applyTheme(THEME_ORDER[(THEME_ORDER.indexOf(currentTheme()) + 1) % THEME_ORDER.length]);
+$('themeBtn').textContent = THEME_LABEL[currentTheme()];
+
 loadKey();
 loadRegistry().then(renderAdvancedUI);
 refreshLibrary();

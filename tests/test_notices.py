@@ -34,3 +34,26 @@ def test_notices_preserve_unicode_on_a_cp1252_host(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "write_text", windows_write_text)
     assert module.main() == 0
     assert out.read_bytes() == module.render(entries).encode("utf-8")
+
+
+def _gen_notices():
+    spec = importlib.util.spec_from_file_location(
+        "chaff_gen_notices_lic", Path("packaging/gen_notices.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_license_or_is_a_choice_and_and_binds_every_term():
+    """paho-mqtt is "EPL-2.0 OR BSD-3-Clause": we may take it under BSD, so
+    it must pass. The old check read OR as AND and rejected it (ADR-0047)."""
+    ok = _gen_notices()._license_ok
+    assert ok("EPL-2.0 OR BSD-3-Clause")
+    assert ok("MIT AND MPL-2.0")
+    assert ok("(MIT OR Apache-2.0) AND BSD-3-Clause")
+    assert ok("Apache Software License")
+    assert not ok("MIT AND GPL-3.0")
+    assert not ok("(MIT OR GPL-3.0) AND GPL-3.0")
+    assert not ok("GPL-3.0")
+    assert not ok("LGPL-2.1")
+    assert not ok("")

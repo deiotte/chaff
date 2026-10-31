@@ -2,8 +2,8 @@
 
 Publishes one MQTT message per encoded record to a topic — the pub/sub
 counterpart to the kafka sink, common for IoT/telemetry demo feeds. paho-mqtt
-is optional, so it lives under the `streaming` extra and is imported lazily —
-core `import chaff.sinks` stays dep-free.
+is a small pure-Python core dependency (ADR-0047); it is still imported
+lazily so `import chaff.sinks` stays cheap.
 
 INV-2: the sink delivers record-bytes as the message payload; it does not
 parse or transform them. The topic is static (from options); it is never
@@ -30,7 +30,7 @@ from __future__ import annotations
 import os
 from typing import Any, Iterator
 
-from . import stream_sink
+from . import missing_dependency, stream_sink
 from ..spec import DatasetSpec
 
 
@@ -61,14 +61,12 @@ def _publish(client: Any, topic: str, records: Iterator[bytes],
     return n
 
 
-@stream_sink("mqtt")
+@stream_sink("mqtt", requires=("paho.mqtt",), extra="streaming")
 def mqtt_sink(spec: DatasetSpec, records: Iterator[bytes]) -> str:
     try:
         import paho.mqtt.client as mqtt
     except ImportError as e:  # pragma: no cover - exercised only without the extra
-        raise RuntimeError(
-            "mqtt sink needs paho-mqtt. Install it with: pip install 'chaff[streaming]'"
-        ) from e
+        raise missing_dependency("mqtt", "paho-mqtt") from e
 
     opts = spec.sink.options
     topic = opts.get("topic")

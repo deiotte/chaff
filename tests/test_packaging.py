@@ -70,6 +70,15 @@ def test_every_bundled_optional_dependency_is_a_hidden_import(config):
         assert module in config.HIDDEN_IMPORTS, f"{module} would be missing from the bundle"
 
 
+def test_core_streaming_clients_are_bundled_and_kafka_is_not(config):
+    """ADR-0047: http/mqtt are core, so the desktop Stream tab offers them —
+    their lazy imports must be bundled. Kafka's compiled client stays out;
+    the UI shows it as "not installed" instead of failing mid-demo."""
+    for module in ("httpx", "paho.mqtt.client"):
+        assert module in config.HIDDEN_IMPORTS, f"{module} would be missing from the bundle"
+    assert "confluent_kafka" in config.EXCLUDES
+
+
 def test_api_submodules_are_hidden_imports(config):
     """`api` is a namespace package and api.nl is imported lazily in /draft."""
     for module in ("api", "api.main", "api.nl"):

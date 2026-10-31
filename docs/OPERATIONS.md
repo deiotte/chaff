@@ -160,6 +160,8 @@ See [ADR-0031](adr/0031-build-input-integrity.md).
 | Port 8000 is occupied | Change the Compose mapping to `"${CHAFF_BIND:-127.0.0.1}:8080:8000"`, then open port 8080. |
 | The page loads but API calls return 401 | Enter the configured access token. Container/proxy networking may make local traffic appear remote; set a token rather than weakening the loopback rule. |
 | XLSX, Parquet, or Avro fails with a missing dependency | Add `formats-extra` to the source install or Docker `CHAFF_EXTRAS` and rebuild. |
+| A Stream target says "not installed" (or a push job is refused with a `pip install` command) | That sink's client library isn't on the server. Run the command it shows (Kafka: `pip install 'chaff[kafka]'`; Docker: keep `streaming` or `kafka` in `CHAFF_EXTRAS` and rebuild), then restart. `chaff registry` lists what's missing. |
+| `pip install 'chaff[kafka]'` (or `[all]`) fails building `confluent-kafka` | No ready-made Kafka client for this OS/CPU/Python. Install without Kafka (`.[api,formats-extra]`); HTTP, MQTT, TCP, and UDP still work. To get Kafka, use Docker or a mainstream x86-64/ARM64 Linux with a supported Python. |
 | AI drafting reports a missing SDK or key | Install the provider's extra and supply its key; Google is not in the default image. |
 | Drafting returns 413, 429, or 503 | Shorten the description, wait for the rate window, or check whether drafting is disabled. |
 | TCP to a TAK port is refused or reset immediately | Confirm the configured input protocol. Plain chaff TCP cannot negotiate the common mutual-TLS input; use the TLS relay path. |

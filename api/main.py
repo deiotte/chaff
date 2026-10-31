@@ -55,7 +55,7 @@ from chaff.generators import (
     list_generator_groups,
     list_generators,
 )
-from chaff.sinks import list_sinks
+from chaff.sinks import list_sink_status, list_sinks
 from chaff.spec import DatasetSpec, load_spec
 from chaff.updaters import list_updater_examples, list_updaters
 
@@ -141,6 +141,9 @@ def registry():
 
         "formats": list_formats(),
         "sinks": list_sinks(),
+        # Which sinks can actually run here, and the pip command for the rest,
+        # so the Stream tab can grey out a target instead of failing mid-demo.
+        "sink_status": list_sink_status(),
         "updaters": list_updaters(),
         "updater_examples": list_updater_examples(),  # params shape per updater
         # Desktop builds get a Quit button; the web/Docker UI must not.
