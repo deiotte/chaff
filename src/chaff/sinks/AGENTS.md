@@ -17,3 +17,12 @@ never parses, transforms, or inspects payload content (INV-2).
   endpoint 4xx) — a silent demo-data drop is a debugging séance.
 - Secrets/credentials come from env or options, never hardcoded, never
   logged in receipts.
+- A sink that imports a third-party client declares it at registration:
+  `@stream_sink("kafka", requires=("confluent_kafka",), extra="kafka")`, and
+  raises `missing_dependency(sink_id, package)` when the import fails. That
+  feeds `chaff registry`, `/registry`'s `sink_status`, and the Stream tab's
+  "not installed" state (ADR-0047). `tests/test_sink_requirements.py` fails
+  if a lazy import isn't declared.
+- Pure-Python, install-anywhere clients may be core dependencies; compiled,
+  per-platform ones (confluent-kafka) get their own extra so they can never
+  break the core install. Add any new extra to `all` in pyproject.toml.

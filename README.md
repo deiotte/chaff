@@ -60,7 +60,7 @@ git clone https://github.com/deiotte/chaff.git
 cd chaff
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e '.[api,formats-extra,streaming]'
+python -m pip install -e '.[all]'
 
 chaff validate examples/retail_orders.json
 chaff generate examples/retail_orders.json
@@ -73,7 +73,19 @@ Open [localhost:8000](http://localhost:8000), choose a **Library** preset,
 **Preview**, then **Download**. Related tables download together as a ZIP.
 Use **+ Related table** or **+ Time series** to author those modes in the UI.
 
-For the core CLI/library alone, `python -m pip install -e .` is enough.
+`all` installs the web UI, every file format, every streaming target, and every
+AI drafting provider. If it stops while building `confluent-kafka` (the Kafka
+client has no ready-made build for some systems: older Linux, Alpine, 32-bit
+ARM, very new Python), install everything except Kafka instead:
+
+```bash
+python -m pip install -e '.[api,formats-extra]'
+```
+
+For the core CLI/library alone, `python -m pip install -e .` is enough; it can
+already stream to HTTP, MQTT, TCP, and UDP. Kafka is the one opt-in target:
+add it with `python -m pip install -e '.[kafka]'`. `chaff registry` shows which
+sinks this install can run, and the UI's **Stream** tab greys out the rest.
 The API/UI live in the checkout's `api/` directory; run the server from the
 repository root. `chaff validate` checks the spec contract, not every generator
 option or destination: generate a small fixture before relying on a new spec.
@@ -112,7 +124,8 @@ published release verified on 2026-10-21 is
 [v0.2.0](https://github.com/deiotte/chaff/releases/tag/v0.2.0); the migration,
 plant-feed, and later sensor work described here requires newer source until
 another tag is released. Desktop bundles include extra file formats and
-Anthropic/OpenAI drafting, but omit Kafka/MQTT clients and Google drafting.
+Anthropic/OpenAI drafting, and can stream over HTTP, MQTT, TCP, and UDP. They
+omit the Kafka client and Google drafting.
 Unsigned packages can trigger OS warnings.
 
 [How releases build and attach the desktop files](docs/RELEASING.md) explains
@@ -201,8 +214,10 @@ runs also depend on runtime speed for their final record count.
 | TSV, SQL, XML, `fixed_width`, `fixed_width_layout` | Yes | Not implemented | Standard library |
 | XLSX, Parquet, Avro | Yes | Not implemented | `formats-extra` |
 
-Sinks are `file`, `http`, `kafka`, `mqtt`, `tcp`, and `udp`. HTTP/Kafka/MQTT
-require `streaming`; TCP/UDP use raw sockets with no TLS or authentication.
+Sinks are `file`, `http`, `kafka`, `mqtt`, `tcp`, and `udp`. HTTP and MQTT work
+from a plain install; Kafka needs the `kafka` extra
+([ADR-0047](docs/adr/0047-pure-python-sinks-ship-in-core-kafka-stays-opt-in.md)).
+TCP/UDP use raw sockets with no TLS or authentication.
 Streaming JSON encodes individual records rather than a batch array.
 Multi-table and multi-observer runs are file/batch-only. KLV `frame_column`
 mode groups several targets per frame and refuses push streaming.
@@ -268,7 +283,7 @@ to the provider. See [drafting setup and budgets](docs/OPERATIONS.md#optional-ai
 From the checkout with your virtual environment active:
 
 ```bash
-python -m pip install -e '.[dev,dev-browser,api,formats-extra,streaming,nl,nl-openai]'
+python -m pip install -e '.[dev,dev-browser,all]'
 python -m playwright install chromium
 CHAFF_REQUIRE_BROWSER_TESTS=1 make check
 make examples

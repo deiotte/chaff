@@ -47,12 +47,17 @@ HIDDEN_IMPORTS = [
     "pyarrow", "pyarrow.parquet",   # parquet
     "fastavro",                     # avro
     "anthropic", "openai",          # NL drafting (Google intentionally excluded)
+    # Streaming sinks that are core deps (ADR-0047). Lazily imported inside
+    # the sink, so list them: the desktop app's Stream tab offers HTTP/MQTT.
+    "httpx", "paho.mqtt.client",
 ]
 
 # Unused / too heavy / not UI-reachable.
 EXCLUDES = [
     "uvloop", "httptools",              # we force loop=asyncio/http=h11
-    "confluent_kafka",                  # kafka sink isn't reachable from the UI
+    # Kafka is a compiled, platform-specific client (ADR-0047): kept out of
+    # the desktop bundles. The Stream tab shows it as "not installed".
+    "confluent_kafka",
     "google", "google.generativeai", "grpc", "grpcio",  # grpcio too heavy
     "tkinter",                          # unused GUI toolkit; trims size
 ]

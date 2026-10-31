@@ -626,6 +626,19 @@ Tracking epic: #92. Redaction test documents are out of scope; they live in
       learner can be judged on seeded months with a drift of known size. The learner's answer key
       follows as its own ADR.
 
+## Install and everyday comfort
+- [x] **Streaming works from a plain install (ADR-0047).** `httpx` and `paho-mqtt`
+      are core dependencies, so HTTP and MQTT stream with no extra step. Kafka's
+      compiled client stays opt-in (`chaff[kafka]`; `streaming` remains an alias)
+      so it can never break the core install. `chaff[all]` is the one-line
+      install. Sinks declare their client at registration; `chaff registry`,
+      `/registry` (`sink_status`), and the Stream tab say what's missing and the
+      exact `pip install` that fixes it, and `/stream/jobs` refuses an
+      uninstalled sink up front. Desktop bundles gain HTTP/MQTT.
+- [x] **Dark mode (ADR-0048).** Every UI color is a CSS token; the page follows
+      the OS by default, and a header button cycles Auto → Dark → Light,
+      remembered per browser.
+
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
 - Data anonymization / production-data masking (that's Tonic's lane; chaff

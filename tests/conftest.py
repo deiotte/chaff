@@ -163,8 +163,10 @@ def _chromium_executable() -> str | None:
     if not root or not os.path.isdir(root):
         return None
     from pathlib import Path
-    for entry in sorted(Path(root).glob("chromium-*/chrome-linux/chrome")):
-        return str(entry)
+    # Newer Chromium builds unpack to chrome-linux64/, older ones chrome-linux/.
+    for pattern in ("chromium-*/chrome-linux64/chrome", "chromium-*/chrome-linux/chrome"):
+        for entry in sorted(Path(root).glob(pattern)):
+            return str(entry)
     return None
 
 

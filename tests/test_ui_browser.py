@@ -405,3 +405,117 @@ def test_a_protected_server_tells_you_what_to_do(browser, token_server):
     finally:
         ctx.close()
     assert not errors, f"JavaScript errors on the page: {errors}"
+
+
+# ── Dark mode: one palette swap, remembered per browser ──────────────
+
+def _bg(pg, selector="body"):
+    return pg.locator(selector).first.evaluate("e => getComputedStyle(e).backgroundColor")
+
+
+def _luma(rgb: str) -> float:
+    r, g, b = (int(x) for x in rgb[rgb.index("(") + 1:rgb.index(")")].split(",")[:3])
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def _themed_page(browser, live_server, scheme):
+    ctx = browser.new_context(color_scheme=scheme)
+    pg = ctx.new_page()
+    errors: list[str] = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    pg.goto(live_server, wait_until="networkidle")
+    return ctx, pg, errors
+
+
+def test_auto_theme_follows_the_os_setting(browser, live_server):
+    ctx, pg, errors = _themed_page(browser, live_server, "dark")
+    try:
+        assert pg.locator("#themeBtn").inner_text() == "Theme: Auto"
+        assert _luma(_bg(pg)) < 60, "OS asked for dark; the page stayed light"
+        # Form fields follow too, or they'd be white boxes on a dark page.
+        assert _luma(_bg(pg, "#nlText")) < 60
+        assert not errors
+    finally:
+        ctx.close()
+
+
+def test_theme_button_overrides_the_os_and_is_remembered(browser, live_server):
+    ctx, pg, errors = _themed_page(browser, live_server, "light")
+    try:
+        assert _luma(_bg(pg)) > 200
+        pg.locator("#themeBtn").click()          # Auto -> Dark
+        assert pg.locator("#themeBtn").inner_text() == "Theme: Dark"
+        assert _luma(_bg(pg)) < 60
+        pg.reload(wait_until="networkidle")      # remembered across a reload
+        assert pg.locator("#themeBtn").inner_text() == "Theme: Dark"
+        assert _luma(_bg(pg)) < 60
+        pg.locator("#themeBtn").click()          # Dark -> Light
+        assert _luma(_bg(pg)) > 200
+        pg.locator("#themeBtn").click()          # Light -> Auto (OS is light)
+        assert pg.locator("#themeBtn").inner_text() == "Theme: Auto"
+        assert _luma(_bg(pg)) > 200
+        assert pg.evaluate("localStorage.getItem('chaff_theme')") is None
+        assert not errors
+    finally:
+        ctx.close()
+
+
+def test_light_override_beats_a_dark_os(browser, live_server):
+    ctx, pg, errors = _themed_page(browser, live_server, "dark")
+    try:
+        pg.evaluate("localStorage.setItem('chaff_theme', 'light')")
+        pg.reload(wait_until="networkidle")
+        assert pg.locator("#themeBtn").inner_text() == "Theme: Light"
+        assert _luma(_bg(pg)) > 200
+        assert not errors
+    finally:
+        ctx.close()
+
+
+# ── Stream tab: a target this server can't run is greyed out (ADR-0047) ──
+
+def test_uninstalled_sink_is_disabled_with_its_install_command(browser, live_server):
+    ctx = browser.new_context()
+    pg = ctx.new_page()
+    errors: list[str] = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+
+    def fake_registry(route):
+        reg = route.fetch().json()
+        reg["sink_status"]["kafka"] = {"available": False, "missing": ["confluent_kafka"],
+                                       "install": "pip install 'chaff[kafka]'"}
+        route.fulfill(json=reg)
+
+    pg.route("**/registry", fake_registry)
+    try:
+        pg.goto(live_server, wait_until="networkidle")
+        pg.locator(".tab[data-pane='paneStream']").click()
+        kafka = pg.locator("#deliveryPicker input[value='kafka']")
+        assert kafka.is_disabled()
+        assert pg.locator("#deliveryPicker input[value='mqtt']").is_enabled()
+        note = pg.locator("#missingSinks")
+        assert note.is_visible()
+        assert "pip install 'chaff[kafka]'" in note.inner_text()
+        assert not errors
+    finally:
+        ctx.close()
+
+
+def test_no_missing_note_when_every_sink_is_installed(browser, live_server):
+    ctx = browser.new_context()
+    pg = ctx.new_page()
+
+    def all_available(route):
+        reg = route.fetch().json()
+        for st in reg["sink_status"].values():
+            st.update(available=True, missing=[], install=None)
+        route.fulfill(json=reg)
+
+    pg.route("**/registry", all_available)
+    try:
+        pg.goto(live_server, wait_until="networkidle")
+        pg.locator(".tab[data-pane='paneStream']").click()
+        assert not pg.locator("#missingSinks").is_visible()
+        assert pg.locator("#deliveryPicker input[value='kafka']").is_enabled()
+    finally:
+        ctx.close()

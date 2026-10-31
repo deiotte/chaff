@@ -1,8 +1,9 @@
 """Kafka streaming sink. See sinks/AGENTS.md.
 
 Produces one Kafka message per encoded record to a topic. confluent-kafka
-is heavy/optional, so it lives under the `streaming` extra and is imported
-lazily — core `import chaff.sinks` stays dep-free.
+is a compiled, platform-specific wheel, so it stays opt-in under the `kafka`
+extra (ADR-0047) and is imported lazily — core `import chaff.sinks` never
+needs it.
 
 INV-2: the sink delivers record-bytes as message values; it does not parse
 or transform them. It therefore does not derive per-record message keys
@@ -26,7 +27,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterator
 
-from . import stream_sink
+from . import missing_dependency, stream_sink
 from ..spec import DatasetSpec
 
 
@@ -80,14 +81,12 @@ def effective_config(opts: dict) -> dict:
     return config
 
 
-@stream_sink("kafka")
+@stream_sink("kafka", requires=("confluent_kafka",), extra="kafka")
 def kafka_sink(spec: DatasetSpec, records: Iterator[bytes]) -> str:
     try:
         from confluent_kafka import Producer
     except ImportError as e:  # pragma: no cover - exercised only without the extra
-        raise RuntimeError(
-            "kafka sink needs confluent-kafka. Install it with: pip install 'chaff[streaming]'"
-        ) from e
+        raise missing_dependency("kafka", "confluent-kafka") from e
 
     opts = spec.sink.options
     topic = opts.get("topic")

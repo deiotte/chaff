@@ -161,10 +161,64 @@ def _license_ok(lic: str) -> bool:
     lic = (lic or "").strip().lower()
     if lic in ALLOWED:
         return True
-    # tolerate compound/expression strings like "MIT OR Apache-2.0", "MIT AND MPL-2.0"
-    parts = [p.strip() for chunk in lic.replace("(", " ").replace(")", " ").split(" or ")
-             for p in chunk.split(" and ")]
-    return bool(parts) and all(any(a in p or p in a for a in ALLOWED) for p in parts if p)
+    # SPDX-style expressions: "A OR B" lets us pick either licence, so one
+    # permissive branch is enough (paho-mqtt is "EPL-2.0 OR BSD-3-Clause");
+    # "A AND B" binds every term, so all must be permissive. AND binds tighter
+    # than OR, and parentheses group.
+    tokens = lic.replace("(", " ( ").replace(")", " ) ").split()
+    pos = 0
+
+    def term_ok(name: str) -> bool:
+        return any(a in name or name in a for a in ALLOWED)
+
+    def parse_or() -> bool:
+        nonlocal pos
+        ok = parse_and()
+        while pos < len(tokens) and tokens[pos] == "or":
+            pos += 1
+            ok = parse_and() or ok
+        return ok
+
+    def parse_and() -> bool:
+        nonlocal pos
+        ok = parse_atom()
+        while pos < len(tokens) and tokens[pos] == "and":
+            pos += 1
+            ok = parse_atom() and ok
+        return ok
+
+    def parse_atom() -> bool:
+        nonlocal pos
+        if pos < len(tokens) and tokens[pos] == "(":
+            pos += 1
+            ok = parse_or()
+            if pos < len(tokens) and tokens[pos] == ")":
+                pos += 1
+            return ok
+        # A licence name can contain spaces ("apache software license") and a
+        # bracketed alias straight after it ("ISC License (ISCL)", trove-style):
+        # a "(" that follows a name is part of the name, not a group.
+        words = []
+        while pos < len(tokens) and tokens[pos] not in ("and", "or", ")"):
+            if tokens[pos] == "(":
+                if not words:
+                    break
+                depth = 0
+                while pos < len(tokens):
+                    depth += {"(": 1, ")": -1}.get(tokens[pos], 0)
+                    words.append(tokens[pos])
+                    pos += 1
+                    if depth == 0:
+                        break
+                continue
+            words.append(tokens[pos])
+            pos += 1
+        return bool(words) and term_ok(" ".join(words))
+
+    if not tokens:
+        return False
+    ok = parse_or()
+    return ok and pos == len(tokens)
 
 
 if __name__ == "__main__":

@@ -26,7 +26,7 @@ from typing import Optional
 
 from chaff.engine import resolve_stream_limit, stream_encoded
 from chaff.formats import get_record_encoder
-from chaff.sinks import get_stream_sink, is_stream_sink
+from chaff.sinks import get_stream_sink, is_stream_sink, sink_status
 from chaff.spec import DatasetSpec
 
 from .netpolicy import DestinationBlocked, check_destination
@@ -151,6 +151,14 @@ def start_job(spec: DatasetSpec, *, max_records, max_seconds, rate=None) -> Stre
     if not is_stream_sink(sink_id):
         raise StreamJobError(
             f"sink '{sink_id}' isn't a streaming sink — pick kafka, mqtt, http, tcp, or udp")
+    # A missing client library is a config problem, not a runtime one: refuse
+    # with the install command now rather than launch a job that dies on its
+    # first record (ADR-0047).
+    status = sink_status(sink_id)
+    if not status["available"]:
+        raise StreamJobError(
+            f"the {sink_id} sink isn't installed on this server. "
+            f"Install it with: {status['install']}")
     try:
         get_record_encoder(spec.output.format)  # whole-file formats can't stream; fail fast
     except KeyError as e:

@@ -18,6 +18,7 @@ sink, so every streaming sink is paced uniformly and none reimplement it.
 
 from __future__ import annotations
 
+import importlib.util
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
@@ -29,6 +30,10 @@ StreamSinkFn = Callable[[DatasetSpec, "Iterator[bytes]"], str]
 
 _REGISTRY: dict[str, SinkFn] = {}
 _STREAM_REGISTRY: dict[str, StreamSinkFn] = {}
+# sink_id -> (modules it imports lazily, the pip extra that installs them).
+# Declared at registration so "can this sink run here?" is answerable without
+# importing a heavy client or attempting delivery (ADR-0047).
+_REQUIREMENTS: dict[str, tuple[tuple[str, ...], str]] = {}
 
 
 def sink(sink_id: str) -> Callable[[SinkFn], SinkFn]:
@@ -39,10 +44,26 @@ def sink(sink_id: str) -> Callable[[SinkFn], SinkFn]:
     return deco
 
 
-def stream_sink(sink_id: str) -> Callable[[StreamSinkFn], StreamSinkFn]:
+def stream_sink(
+    sink_id: str,
+    *,
+    requires: tuple[str, ...] = (),
+    extra: str | None = None,
+) -> Callable[[StreamSinkFn], StreamSinkFn]:
+    """Register a streaming sink.
+
+    `requires` names the modules the sink imports lazily; `extra` is the
+    `chaff[...]` extra that installs them. Both are optional — a stdlib-only
+    sink (tcp/udp) declares neither.
+    """
+    if requires and not extra:
+        raise ValueError(f"sink '{sink_id}' declares requires= without extra=")
+
     def deco(fn: StreamSinkFn) -> StreamSinkFn:
         _guard(sink_id)
         _STREAM_REGISTRY[sink_id] = fn
+        if requires:
+            _REQUIREMENTS[sink_id] = (tuple(requires), extra)  # type: ignore[assignment]
         return fn
     return deco
 
@@ -72,6 +93,51 @@ def is_stream_sink(sink_id: str) -> bool:
 
 def list_sinks() -> list[str]:
     return sorted(set(_REGISTRY) | set(_STREAM_REGISTRY))
+
+
+def _module_present(name: str) -> bool:
+    """True if `name` is importable, without importing it (the client
+    libraries are heavy; asking must stay cheap)."""
+    try:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, ValueError):  # a missing parent package
+        return False
+
+
+def install_hint(sink_id: str) -> str | None:
+    """The pip command that makes `sink_id` usable, or None if it needs nothing."""
+    req = _REQUIREMENTS.get(sink_id)
+    return f"pip install 'chaff[{req[1]}]'" if req else None
+
+
+def sink_status(sink_id: str) -> dict[str, Any]:
+    """Whether a registered sink can run in this install, and if not, how to fix it.
+
+    `{"available": bool, "missing": [module, ...], "install": str | None}`.
+    """
+    if sink_id not in _REGISTRY and sink_id not in _STREAM_REGISTRY:
+        raise KeyError(f"unknown sink '{sink_id}'. Registered: {list_sinks()}")
+    modules, _extra = _REQUIREMENTS.get(sink_id, ((), None))
+    missing = [m for m in modules if not _module_present(m)]
+    return {
+        "available": not missing,
+        "missing": missing,
+        "install": install_hint(sink_id) if missing else None,
+    }
+
+
+def list_sink_status() -> dict[str, dict[str, Any]]:
+    """`sink_status` for every registered sink, keyed by id."""
+    return {s: sink_status(s) for s in list_sinks()}
+
+
+def missing_dependency(sink_id: str, package: str) -> RuntimeError:
+    """The one error a sink raises when its client library isn't installed —
+    so every sink names the same, correct install command."""
+    return RuntimeError(
+        f"{sink_id} sink needs {package}, which isn't installed. "
+        f"Install it with: {install_hint(sink_id)}"
+    )
 
 
 def rate_limited(
@@ -132,7 +198,7 @@ def file_sink(spec: DatasetSpec, payload: bytes) -> str:
 
 
 # Streaming sinks registered for their side-effect. `raw` (tcp/udp) is
-# stdlib-only and always available; `http`/`kafka`/`mqtt` keep their heavy
-# import (httpx, confluent-kafka, paho-mqtt) lazy so `import chaff.sinks`
-# stays dep-free.
+# stdlib-only; `http`/`mqtt` use core dependencies; `kafka` needs the opt-in
+# `kafka` extra (ADR-0047). All three keep their client import lazy, and
+# declare it via `requires=` so `sink_status()` can say what's missing.
 from . import http, kafka, mqtt, raw  # noqa: E402,F401

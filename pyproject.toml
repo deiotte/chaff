@@ -21,15 +21,36 @@ dependencies = [
     "pydantic>=2.13.5",
     "faker>=20.0",
     "typer>=0.9",
+    # Streaming sinks that are pure Python and install anywhere (ADR-0047):
+    # http + mqtt work out of the box. Kafka stays opt-in below.
+    "httpx>=0.27",
+    "paho-mqtt>=2.1.0",
 ]
 
 [project.optional-dependencies]
 api = ["fastapi>=0.141.1", "uvicorn[standard]>=0.27"]
 formats-extra = ["openpyxl>=3.1.5", "pyarrow>=15", "fastavro>=1.9"]  # xlsx, parquet, avro
-streaming = ["httpx>=0.27", "confluent-kafka>=2.15.0", "paho-mqtt>=2.1.0"]   # http + kafka + mqtt sinks
+# Kafka is the one streaming client that is a compiled, per-platform wheel
+# (bundled librdkafka). Where no wheel exists — older glibc, Alpine/musl,
+# 32-bit ARM, a brand-new Python — pip falls back to a C build that needs a
+# compiler and librdkafka headers. Kept opt-in so it can never break the
+# core install (ADR-0047).
+kafka = ["confluent-kafka>=2.15.0"]
+# Back-compat alias: everything the old `streaming` extra installed. httpx and
+# paho-mqtt are core now, so in practice this adds Kafka.
+streaming = ["httpx>=0.27", "confluent-kafka>=2.15.0", "paho-mqtt>=2.1.0"]
 nl = ["anthropic>=0.40"]              # NL spec drafting via Anthropic (api/nl.py)
 nl-openai = ["openai>=1.0"]           # ... or OpenAI (auto-detected by OPENAI_API_KEY)
 nl-google = ["google-generativeai>=0.8.6"]  # ... or Google (GOOGLE_API_KEY)
+# One command for "everything a user can reach": UI/API, every file format,
+# every sink, every drafting provider. Kafka is in here, so if it can't build
+# on your platform, drop back to the extras you need (README "Try it").
+all = [
+    "fastapi>=0.141.1", "uvicorn[standard]>=0.27",
+    "openpyxl>=3.1.5", "pyarrow>=15", "fastavro>=1.9",
+    "confluent-kafka>=2.15.0",
+    "anthropic>=0.40", "openai>=1.0", "google-generativeai>=0.8.6",
+]
 dev = ["pytest>=8.0", "httpx>=0.27"]
 # Browser-driven UI tests (ADR-0022). Optional on purpose: `make check` is the
 # definition of green for every contributor, so tests/test_ui_browser.py skips
