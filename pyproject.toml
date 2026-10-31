@@ -40,7 +40,7 @@ kafka = ["confluent-kafka>=2.15.0"]
 # paho-mqtt are core now, so in practice this adds Kafka.
 streaming = ["httpx>=0.27", "confluent-kafka>=2.15.0", "paho-mqtt>=2.1.0"]
 nl = ["anthropic>=0.40"]              # NL spec drafting via Anthropic (api/nl.py)
-nl-openai = ["openai>=1.0"]           # ... or OpenAI (auto-detected by OPENAI_API_KEY)
+nl-openai = ["openai>=3.19.2"]           # ... or OpenAI (auto-detected by OPENAI_API_KEY)
 nl-google = ["google-generativeai>=0.8.6"]  # ... or Google (GOOGLE_API_KEY)
 # One command for "everything a user can reach": UI/API, every file format,
 # every sink, every drafting provider. Kafka is in here, so if it can't build
