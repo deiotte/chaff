@@ -24,6 +24,9 @@ dependencies = [
     # Streaming sinks that are pure Python and install anywhere (ADR-0047):
     # http + mqtt work out of the box. Kafka stays opt-in below.
     "httpx>=0.27",
+    # httpx brings certifi in; this floor keeps a build off the bundle with
+    # GHSA-6q48-6c7w-9gw2 (critical, fixed in 2026.10.18).
+    "certifi>=2026.10.18",
     "paho-mqtt>=2.1.0",
 ]
 
