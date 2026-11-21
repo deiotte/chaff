@@ -15,39 +15,46 @@
 </script>
 <style>
   /* Every color is a token, so dark mode is one palette swap — not a hunt for
-     hard-coded hex. Add a color? Add a token, in all three blocks. */
+     hard-coded hex. Add a color? Add a token, in all three blocks.
+     Cards must stand off the page in both palettes (ADR-0049): the page is
+     the darker surface, cards are lighter, with a visible edge and a shadow. */
   :root { color-scheme:light;
-          --bg:#f6f7f9; --card:#fff; --ink:#1c2330; --muted:#6b7484;
-          --line:#e2e6ec; --accent:#2f6f4f; --accent-ink:#fff; --bad:#b4232a;
-          --field:#fff; --soft:#eef1f4; --accent-soft:#e7f1ec; --accent-wash:#f0f7f3;
-          --fx-bg:#f5faf7; --bad-soft:#f3e7e7; --warn-bg:#fbf3e6; --warn-wash:#fbf7e8;
-          --warn-line:#e6d9a8; --panel:#fbfcfd; --panel-2:#f6f8fa; --code-bg:#e8ecef;
-          --faint:#aaa; --feed-bg:#0f1115; --feed-ink:#d7e2dd; }
+          --bg:#dde2e9; --card:#f6f7f9; --ink:#1c2330; --muted:#566070;
+          --line:#c2c9d3; --accent:#2f6f4f; --accent-ink:#fff; --bad:#b4232a;
+          --field:#fcfdfe; --soft:#e1e6ec; --accent-soft:#d9eadf; --accent-wash:#e6f2ea;
+          --fx-bg:#ebf3ee; --bad-soft:#f0dede; --warn-bg:#f8edd8; --warn-wash:#f7f0d9;
+          --warn-line:#dccb8e; --panel:#eff1f4; --panel-2:#e9edf1; --code-bg:#dce1e6;
+          --faint:#8a929d; --feed-bg:#0f1115; --feed-ink:#d7e2dd;
+          --raised:#fff; --shadow:0 1px 2px rgba(28,35,48,.10), 0 3px 10px rgba(28,35,48,.07); }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) { color-scheme:dark;
-          --bg:#0f1318; --card:#171c23; --ink:#e4e8ee; --muted:#9aa4b2;
-          --line:#2a313b; --accent:#5fbf8f; --accent-ink:#0d1a13; --bad:#f0787c;
+          --bg:#0b0e12; --card:#181d25; --ink:#e4e8ee; --muted:#9aa4b2;
+          --line:#333b47; --accent:#5fbf8f; --accent-ink:#0d1a13; --bad:#f0787c;
           --field:#10151b; --soft:#232a33; --accent-soft:#1d3328; --accent-wash:#18291f;
           --fx-bg:#152219; --bad-soft:#3a1f22; --warn-bg:#33291a; --warn-wash:#2d2618;
           --warn-line:#5c4a22; --panel:#141920; --panel-2:#1b2129; --code-bg:#262d36;
-          --faint:#6b7480; --feed-bg:#0a0c10; --feed-ink:#d7e2dd; }
+          --faint:#6b7480; --feed-bg:#0a0c10; --feed-ink:#d7e2dd;
+          --raised:#222a34; --shadow:0 1px 2px rgba(0,0,0,.45), 0 3px 10px rgba(0,0,0,.30); }
   }
   :root[data-theme="dark"] { color-scheme:dark;
-          --bg:#0f1318; --card:#171c23; --ink:#e4e8ee; --muted:#9aa4b2;
-          --line:#2a313b; --accent:#5fbf8f; --accent-ink:#0d1a13; --bad:#f0787c;
+          --bg:#0b0e12; --card:#181d25; --ink:#e4e8ee; --muted:#9aa4b2;
+          --line:#333b47; --accent:#5fbf8f; --accent-ink:#0d1a13; --bad:#f0787c;
           --field:#10151b; --soft:#232a33; --accent-soft:#1d3328; --accent-wash:#18291f;
           --fx-bg:#152219; --bad-soft:#3a1f22; --warn-bg:#33291a; --warn-wash:#2d2618;
           --warn-line:#5c4a22; --panel:#141920; --panel-2:#1b2129; --code-bg:#262d36;
-          --faint:#6b7480; --feed-bg:#0a0c10; --feed-ink:#d7e2dd; }
+          --faint:#6b7480; --feed-bg:#0a0c10; --feed-ink:#d7e2dd;
+          --raised:#222a34; --shadow:0 1px 2px rgba(0,0,0,.45), 0 3px 10px rgba(0,0,0,.30); }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
          font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-  header { padding:18px 24px; border-bottom:1px solid var(--line); background:var(--card); }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); background:var(--card);
+           box-shadow:var(--shadow); position:relative; }
   header h1 { margin:0; font-size:20px; letter-spacing:.2px; }
   header p { margin:2px 0 0; color:var(--muted); font-size:13px; }
   main { max-width:1000px; margin:0 auto; padding:24px; display:grid;
          grid-template-columns:1fr; gap:20px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px;
+          box-shadow:var(--shadow); }
   .card h2 { margin:0 0 14px; font-size:14px; text-transform:uppercase;
              letter-spacing:.6px; color:var(--muted); }
   label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
@@ -125,7 +132,8 @@
   .tbl-head { display:grid; grid-template-columns:2fr 1fr 32px; gap:10px; align-items:end; }
   .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px; }
   .spec-card { text-align:left; border:1px solid var(--line); border-radius:9px; padding:11px 12px;
-               background:var(--card); cursor:pointer; font:inherit; color:inherit; transition:border-color .12s; }
+               background:var(--raised); cursor:pointer; font:inherit; color:inherit;
+               box-shadow:var(--shadow); transition:border-color .12s; }
   .spec-card:hover { border-color:var(--accent); }
   .spec-card .nm { font-weight:600; font-size:14px; display:flex; justify-content:space-between; gap:6px; align-items:center; }
   .spec-card .badge { font-size:10px; text-transform:uppercase; letter-spacing:.5px; padding:2px 6px;

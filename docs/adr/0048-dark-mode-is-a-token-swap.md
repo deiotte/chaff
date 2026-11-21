@@ -36,3 +36,5 @@ override for every one of them, and a color added later would silently stay ligh
 - `tests/test_ui_browser.py` checks the OS-following default, the override, that the override is
   remembered across a reload, and that a forced Light beats a dark OS.
 - The `/licenses` page was already dark and is unchanged.
+- ADR-0049 later retuned both palettes so cards stand off the page; the token-swap design
+  here is unchanged.
