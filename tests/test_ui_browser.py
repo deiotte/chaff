@@ -472,6 +472,27 @@ def test_light_override_beats_a_dark_os(browser, live_server):
         ctx.close()
 
 
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_cards_stand_off_the_page_in_both_themes(browser, live_server, scheme):
+    """ADR-0049: a card must not melt into the page behind it. Light used to be
+    near-white on white; this fails if either palette drifts back to that."""
+    ctx, pg, errors = _themed_page(browser, live_server, scheme)
+    try:
+        pg.wait_for_selector(".spec-card")
+        page_l = _luma(_bg(pg))
+        card_l = _luma(_bg(pg, ".card"))
+        preset_l = _luma(_bg(pg, ".spec-card"))
+        assert card_l - page_l >= 8, f"cards blend into the page ({scheme})"
+        assert preset_l - card_l >= 5, f"library cards blend into their card ({scheme})"
+        shadow = pg.locator(".card").first.evaluate("e => getComputedStyle(e).boxShadow")
+        assert shadow != "none"
+        if scheme == "light":
+            assert page_l < 235, "the light page is back to near-white"
+        assert not errors
+    finally:
+        ctx.close()
+
+
 # ── Stream tab: a target this server can't run is greyed out (ADR-0047) ──
 
 def test_uninstalled_sink_is_disabled_with_its_install_command(browser, live_server):

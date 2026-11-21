@@ -638,6 +638,9 @@ Tracking epic: #92. Redaction test documents are out of scope; they live in
 - [x] **Dark mode (ADR-0048).** Every UI color is a CSS token; the page follows
       the OS by default, and a header button cycles Auto → Dark → Light,
       remembered per browser.
+- [x] **Cards stand off the page (ADR-0049).** The light page is no longer
+      near-white: a grey-blue page under off-white cards, with a border and a
+      shadow, in both palettes.
 
 ## Non-goals (permanent)
 - AI/ML training data production (INV-5)
